@@ -2,6 +2,7 @@
 
 import json
 import logging
+import logging.handlers
 import os
 from contextlib import asynccontextmanager
 from datetime import date, datetime
@@ -12,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from pib.db import apply_schema, get_config, get_connection, next_id, set_config
+from pib.db import apply_migrations, apply_schema, get_config, get_connection, next_id, set_config
 from pib.engine import (
     DBSnapshot,
     WhatNowResult,
@@ -25,6 +26,35 @@ from pib.rewards import complete_task_with_reward, select_reward
 
 log = logging.getLogger(__name__)
 
+
+def setup_logging():
+    """Configure structured JSON logging per spec §3.4."""
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+
+    # Console handler (always active)
+    console = logging.StreamHandler()
+    console.setFormatter(logging.Formatter(
+        "%(asctime)s %(levelname)s %(name)s: %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%S",
+    ))
+    root.addHandler(console)
+
+    # File handler (production — /opt/pib/logs/)
+    log_dir = os.environ.get("PIB_LOG_DIR", "/opt/pib/logs")
+    if os.path.isdir(log_dir):
+        file_handler = logging.handlers.RotatingFileHandler(
+            os.path.join(log_dir, "pib.jsonl"),
+            maxBytes=10 * 1024 * 1024,  # 10MB
+            backupCount=5,
+        )
+        file_handler.setFormatter(logging.Formatter(
+            '{"ts":"%(asctime)s","level":"%(levelname)s","logger":"%(name)s","msg":"%(message)s"}',
+            datefmt="%Y-%m-%dT%H:%M:%SZ",
+        ))
+        root.addHandler(file_handler)
+
+
 # ─── Database singleton ───
 _db: aiosqlite.Connection | None = None
 
@@ -34,6 +64,7 @@ async def get_db() -> aiosqlite.Connection:
     if _db is None:
         _db = await get_connection()
         await apply_schema(_db)
+        await apply_migrations(_db)
     return _db
 
 
@@ -41,9 +72,17 @@ async def get_db() -> aiosqlite.Connection:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    setup_logging()
     db = await get_db()
     log.info("PIB v5 starting — database connected")
+
+    from pib.scheduler import setup_scheduler
+    scheduler = await setup_scheduler(app, db)
+
     yield
+
+    if scheduler:
+        scheduler.shutdown(wait=False)
     if _db:
         await _db.close()
     log.info("PIB v5 shutdown")
@@ -51,9 +90,10 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="PIB v5", version="5.0.0", lifespan=lifespan)
 
+_cors_origins = os.environ.get("PIB_CORS_ORIGINS", "*").split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )

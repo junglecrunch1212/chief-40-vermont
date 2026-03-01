@@ -9,7 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 import aiosqlite
-from pib.db import apply_schema, get_connection
+from pib.db import apply_migrations, apply_schema, get_connection
 
 
 MEMBERS = [
@@ -140,6 +140,7 @@ async def seed(db_path: str = "pib.db"):
     """Seed a database with all household configuration."""
     conn = await get_connection(db_path)
     await apply_schema(conn)
+    await apply_migrations(conn)
 
     # Members
     for m in MEMBERS:

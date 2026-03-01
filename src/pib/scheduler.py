@@ -195,15 +195,16 @@ async def _recurring_spawn(db):
              r.get("energy"), r.get("effort", "small"), micro, "recurring", "scheduler"],
         )
 
-        # Advance next_due based on rrule
-        rrule = r.get("rrule", "")
-        if "DAILY" in rrule:
+        # Advance next_due based on frequency column
+        frequency = r.get("frequency", "")
+        freq_upper = frequency.upper()
+        if freq_upper == "DAILY":
             from datetime import timedelta
             next_due = today + timedelta(days=1)
-        elif "WEEKLY" in rrule:
+        elif freq_upper == "WEEKLY":
             from datetime import timedelta
             next_due = today + timedelta(weeks=1)
-        elif "MONTHLY" in rrule:
+        elif freq_upper == "MONTHLY":
             next_due = today.replace(month=today.month + 1) if today.month < 12 else today.replace(year=today.year + 1, month=1)
         else:
             next_due = None
@@ -273,11 +274,14 @@ async def _compute_daily_states(db):
     )
     if config_row:
         parent = who_has_child(today, dict(config_row))
+        custody_json = json.dumps({"charlie": parent})
+        member_states_json = json.dumps({})
         await db.execute(
-            "INSERT INTO cal_daily_states (state_date, day_type, custody_states, computed_at) "
-            "VALUES (?, 'normal', ?, datetime('now')) "
-            "ON CONFLICT(state_date) DO UPDATE SET custody_states = excluded.custody_states, computed_at = excluded.computed_at",
-            [today.isoformat(), json.dumps({"charlie": parent})],
+            "INSERT INTO cal_daily_states (state_date, version, custody_states, member_states, complexity_score, computed_at) "
+            "VALUES (?, 1, ?, ?, 0.0, datetime('now')) "
+            "ON CONFLICT(state_date, version) DO UPDATE SET "
+            "custody_states = excluded.custody_states, computed_at = excluded.computed_at",
+            [today.isoformat(), custody_json, member_states_json],
         )
         await db.commit()
         log.info(f"Daily state computed: custody={parent}")
@@ -293,10 +297,13 @@ async def _health_probe(db):
 
 
 async def _sqlite_backup(db):
-    """Hourly SQLite backup."""
+    """Hourly SQLite backup verification."""
     from pib.backup import backup_verify
-    log.info("Running SQLite backup")
-    await backup_verify(db)
+    log.info("Running SQLite backup verification")
+    result = await backup_verify()
+    if not result.get("ok"):
+        log.warning(f"Backup verification issue: {result}")
+    return result
 
 
 async def _cleanup_expired(db):

@@ -123,24 +123,13 @@ async def seed_test_data(db: aiosqlite.Connection):
 @pytest_asyncio.fixture
 async def db():
     """In-memory SQLite database with full schema + seed data."""
-    from pib.db import PIBConnection
+    from pib.db import PIBConnection, apply_schema, apply_migrations
     async with aiosqlite.connect(":memory:") as conn:
         conn.row_factory = aiosqlite.Row
         wrapped = PIBConnection(conn)
-        # Apply schema + migrations
-        schema_path = MIGRATIONS_DIR / "001_initial_schema.sql"
-        with open(schema_path) as f:
-            await wrapped.executescript(f.read())
-        # Apply comms enhancement migration
-        migration_003 = MIGRATIONS_DIR / "003_comms_enhancement.sql"
-        if migration_003.exists():
-            with open(migration_003) as f:
-                await wrapped.executescript(f.read())
-        # Apply voice intelligence migration
-        migration_004 = MIGRATIONS_DIR / "004_voice_intelligence.sql"
-        if migration_004.exists():
-            with open(migration_004) as f:
-                await wrapped.executescript(f.read())
+        # Use production schema + migration path
+        await apply_schema(wrapped)
+        await apply_migrations(wrapped)
         await seed_test_data(wrapped)
         yield wrapped
 

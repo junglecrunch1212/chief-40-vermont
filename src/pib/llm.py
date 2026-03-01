@@ -1085,7 +1085,7 @@ async def chat(db, message: str, member_id: str, channel: str = "web",
         # Track cost
         if response.usage:
             from pib.cost import track_api_cost
-            await track_api_cost(db, model, response.usage.input_tokens, response.usage.output_tokens)
+            await track_api_cost(db, response.usage.input_tokens, response.usage.output_tokens, model)
 
         # Save assistant response
         await save_message(db, sid, "assistant", response_text,

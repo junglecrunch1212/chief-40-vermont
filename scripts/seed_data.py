@@ -42,6 +42,21 @@ MEMBERS = [
     },
 ]
 
+COPARENT = {
+    "id": "m-laura-ex", "display_name": "Ex", "role": "coparent",
+    "is_household_member": 0,
+}
+
+CUSTODY_CONFIG = {
+    "child_id": "m-charlie",
+    "schedule_type": "alternating_weeks",
+    "anchor_date": "2026-01-05",
+    "anchor_parent": "m-james",
+    "other_parent": "m-laura-ex",
+    "effective_from": "2026-01-01",
+    "holiday_overrides": "[]",
+}
+
 CAPTAIN_ITEM = {
     "id": "i-captain", "name": "Captain", "type": "pet",
     "category": "household", "domain": "household",
@@ -151,6 +166,22 @@ async def seed(db_path: str = "pib.db"):
             f"INSERT OR IGNORE INTO common_members ({col_names}) VALUES ({placeholders})",
             list(m.values()),
         )
+
+    # Coparent
+    await conn.execute(
+        "INSERT OR IGNORE INTO common_members (id, display_name, role, is_household_member) VALUES (?,?,?,?)",
+        [COPARENT["id"], COPARENT["display_name"], COPARENT["role"], COPARENT["is_household_member"]],
+    )
+
+    # Custody config
+    c = CUSTODY_CONFIG
+    await conn.execute(
+        "INSERT OR IGNORE INTO common_custody_configs "
+        "(child_id, schedule_type, anchor_date, anchor_parent, other_parent, effective_from, holiday_overrides) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        [c["child_id"], c["schedule_type"], c["anchor_date"],
+         c["anchor_parent"], c["other_parent"], c["effective_from"], c["holiday_overrides"]],
+    )
 
     # Captain (pet)
     await conn.execute(

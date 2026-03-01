@@ -96,6 +96,33 @@ async def setup_scheduler(app, db):
         id="fts5_rebuild",
     )
 
+    # ─── Comms Domain ───
+    scheduler.add_job(
+        lambda: _run_job(db, _extraction_worker),
+        CronTrigger.from_crontab("*/5 * * * *"),
+        id="extraction_worker",
+    )
+    scheduler.add_job(
+        lambda: _run_job(db, _unsnooze_comms),
+        CronTrigger.from_crontab("*/15 * * * *"),
+        id="unsnooze_comms",
+    )
+    scheduler.add_job(
+        lambda: _run_job(db, _retry_failed_extractions),
+        CronTrigger.from_crontab("0 */4 * * *"),
+        id="retry_failed_extractions",
+    )
+    scheduler.add_job(
+        lambda: _run_job(db, _expire_stale_drafts),
+        CronTrigger.from_crontab("0 22 * * *"),
+        id="expire_stale_drafts",
+    )
+    scheduler.add_job(
+        lambda: _run_job(db, _synthesize_voice_profiles),
+        CronTrigger.from_crontab("0 3 * * 0"),
+        id="synthesize_voice_profiles",
+    )
+
     scheduler.start()
     log.info(f"Scheduler started with {len(scheduler.get_jobs())} jobs")
     return scheduler
@@ -284,3 +311,55 @@ async def _fts5_rebuild(db):
     from pib.backup import fts5_rebuild
     log.info("Rebuilding FTS5 indexes")
     await fts5_rebuild(db)
+
+
+# ─── Comms Domain Jobs ───
+
+
+async def _extraction_worker(db):
+    """Run async extraction worker every 5 minutes."""
+    from pib.extraction import extraction_worker
+    count = await extraction_worker(db)
+    if count > 0:
+        log.info(f"Extraction worker processed {count} comms")
+
+
+async def _unsnooze_comms(db):
+    """Restore snoozed comms whose snooze has expired."""
+    from pib.comms import unsnooze_due
+    count = await unsnooze_due(db)
+    if count > 0:
+        log.info(f"Unsnoozed {count} comms")
+
+
+async def _retry_failed_extractions(db):
+    """Re-attempt failed extractions every 4 hours."""
+    from pib.extraction import retry_failed_extractions
+    count = await retry_failed_extractions(db)
+    if count > 0:
+        log.info(f"Re-queued {count} failed extractions")
+
+
+async def _expire_stale_drafts(db):
+    """Expire drafts pending > 24 hours at 10 PM daily."""
+    cursor = await db.execute(
+        "UPDATE ops_comms SET draft_status = 'rejected' "
+        "WHERE draft_status = 'pending' AND created_at <= datetime('now', '-24 hours')"
+    )
+    await db.commit()
+    if cursor.rowcount > 0:
+        log.info(f"Expired {cursor.rowcount} stale drafts")
+
+
+async def _synthesize_voice_profiles(db):
+    """Rebuild voice profiles for all active members (Sunday 3 AM)."""
+    from pib.voice import synthesize_profiles
+    members = await db.execute_fetchall(
+        "SELECT id FROM common_members WHERE active = 1 AND role = 'parent'"
+    )
+    total = 0
+    for member in members or []:
+        count = await synthesize_profiles(db, member["id"])
+        total += count
+    if total > 0:
+        log.info(f"Synthesized {total} voice profiles")

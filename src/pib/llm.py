@@ -58,6 +58,12 @@ TASK_TRIGGERS = {
 COVERAGE_TRIGGERS = {
     "who has", "custody", "pickup", "dropoff", "coverage", "gap", "babysit", "sitter",
 }
+COMMS_TRIGGERS = {
+    "message", "messages", "email", "emails", "reply", "respond", "responded",
+    "draft", "inbox", "unread", "text", "texted", "called", "voicemail",
+    "whatsapp", "imessage", "wrote", "sent", "received", "heard from",
+    "reach out", "voice note", "recording",
+}
 
 
 def build_entity_cache(db_rows: list[dict]) -> dict:
@@ -85,6 +91,8 @@ def analyze_relevance(message: str, entity_cache: dict) -> dict:
         assemblers.add("tasks")
     if any(t in msg_lower for t in COVERAGE_TRIGGERS):
         assemblers.update(["coverage", "schedule"])
+    if any(t in msg_lower for t in COMMS_TRIGGERS):
+        assemblers.add("comms")
 
     for entity_id, entity in entity_cache.items():
         if entity["pattern"].search(msg_lower):
@@ -377,6 +385,61 @@ TOOLS = [
             "required": ["action"],
         },
     },
+    # ─── Comms Domain Tools ───
+    {
+        "name": "search_comms",
+        "description": "Search communications by person, channel, date range, urgency, or keyword",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "search": {"type": "string", "description": "Keyword search in summary/body/subject"},
+                "channel": {"type": "string", "description": "Filter by channel (imessage, email, sms, etc.)"},
+                "urgency": {"type": "string", "enum": ["urgent", "timely", "normal", "fyi"]},
+                "needs_response": {"type": "boolean"},
+                "member_id": {"type": "string"},
+                "limit": {"type": "integer", "default": 10},
+            },
+        },
+    },
+    {
+        "name": "draft_response",
+        "description": "Generate a CoS-drafted response for a specific comm using the resolved voice profile",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "comm_id": {"type": "string", "description": "The comm to draft a response for"},
+            },
+            "required": ["comm_id"],
+        },
+    },
+    {
+        "name": "approve_draft",
+        "description": "Approve and send a pending draft response, optionally with edits",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "comm_id": {"type": "string"},
+                "edited_body": {"type": "string", "description": "Optional edited text to replace the draft"},
+            },
+            "required": ["comm_id"],
+        },
+    },
+    {
+        "name": "capture_comm",
+        "description": "Create a manual capture entry (meeting note, call transcript, observation)",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "summary": {"type": "string", "description": "Brief summary of the communication"},
+                "body_snippet": {"type": "string", "description": "Full text or transcript"},
+                "channel": {"type": "string", "default": "manual"},
+                "comm_type": {"type": "string", "enum": ["meeting_note", "call_transcript", "recording_summary", "observation"]},
+                "subject": {"type": "string"},
+                "from_addr": {"type": "string"},
+            },
+            "required": ["summary"],
+        },
+    },
 ]
 
 
@@ -417,6 +480,14 @@ async def execute_tool(db, tool_name: str, tool_input: dict, member_id: str) -> 
             return await _tool_approve_pending(db, tool_input, member_id)
         elif tool_name == "log_state":
             return await _tool_log_state(db, tool_input, member_id)
+        elif tool_name == "search_comms":
+            return await _tool_search_comms(db, tool_input, member_id)
+        elif tool_name == "draft_response":
+            return await _tool_draft_response(db, tool_input, member_id)
+        elif tool_name == "approve_draft":
+            return await _tool_approve_draft(db, tool_input, member_id)
+        elif tool_name == "capture_comm":
+            return await _tool_capture_comm(db, tool_input, member_id)
         else:
             return {"error": f"Unknown tool: {tool_name}"}
     except Exception as e:
@@ -621,6 +692,81 @@ async def _tool_log_state(db, inp: dict, member_id: str) -> dict:
         )
     await db.commit()
     return {"logged": action, "value": value}
+
+
+# ─── Comms Domain Tool Implementations ───
+
+async def _tool_search_comms(db, inp: dict, member_id: str) -> dict:
+    from pib.comms import get_comms_inbox
+    results = await get_comms_inbox(
+        db,
+        search=inp.get("search"),
+        channel=inp.get("channel"),
+        urgency=inp.get("urgency"),
+        needs_response=inp.get("needs_response"),
+        member_id=inp.get("member_id"),
+        limit=inp.get("limit", 10),
+    )
+    return {"comms": results, "count": len(results)}
+
+
+async def _tool_draft_response(db, inp: dict, member_id: str) -> dict:
+    from pib.comms import get_comm_by_id, save_draft
+    from pib.voice import resolve_voice_profile
+
+    comm = await get_comm_by_id(db, inp["comm_id"])
+    if not comm:
+        return {"error": "Comm not found"}
+
+    # Resolve voice profile for tone matching
+    profile = await resolve_voice_profile(
+        db, member_id,
+        recipient_item_ref=comm.get("item_ref"),
+        channel=comm.get("channel"),
+    )
+    style_guide = ""
+    if profile and profile.get("style_summary"):
+        style_guide = f"\n\nMatch this writing style: {profile['style_summary']}"
+
+    # Generate draft via LLM
+    try:
+        import anthropic
+        import os
+        client = anthropic.AsyncAnthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+        response = await client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=500,
+            system=f"You are drafting a response on behalf of {member_id}. "
+                   f"Match their tone and style. Keep it concise.{style_guide}",
+            messages=[{
+                "role": "user",
+                "content": f"Draft a reply to this message:\n"
+                           f"From: {comm.get('from_addr', 'unknown')}\n"
+                           f"Channel: {comm.get('channel', 'unknown')}\n"
+                           f"Message: {comm.get('body_snippet') or comm.get('summary', '')}",
+            }],
+        )
+        draft_text = response.content[0].text.strip()
+    except Exception as e:
+        return {"error": f"Draft generation failed: {e}"}
+
+    profile_id = profile["id"] if profile else None
+    await save_draft(db, inp["comm_id"], draft_text, profile_id)
+    return {"draft": draft_text, "voice_profile": profile_id, "status": "pending"}
+
+
+async def _tool_approve_draft(db, inp: dict, member_id: str) -> dict:
+    from pib.comms import approve_draft
+    result = await approve_draft(db, inp["comm_id"], inp.get("edited_body"))
+    if not result:
+        return {"error": "No pending draft for this comm"}
+    return {"approved": True, "comm_id": inp["comm_id"]}
+
+
+async def _tool_capture_comm(db, inp: dict, member_id: str) -> dict:
+    from pib.comms import capture_manual
+    comm_id = await capture_manual(db, member_id, inp)
+    return {"captured": comm_id, "summary": inp["summary"]}
 
 
 # ─── Conversation History ───

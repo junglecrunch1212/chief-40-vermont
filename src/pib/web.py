@@ -976,10 +976,10 @@ async def get_contacts():
 
 
 @app.get("/api/people/comms")
-async def get_comms(limit: int = 20):
+async def get_people_comms(limit: int = 20):
     db = await get_db()
     rows = await db.execute_fetchall(
-        "SELECT * FROM ops_comms ORDER BY last_contact_at DESC LIMIT ?", [limit]
+        "SELECT * FROM ops_comms ORDER BY date DESC LIMIT ?", [limit]
     )
     return [dict(r) for r in rows] if rows else []
 
@@ -1032,6 +1032,176 @@ async def get_phases():
     db = await get_db()
     rows = await db.execute_fetchall("SELECT * FROM common_life_phases ORDER BY start_date")
     return [dict(r) for r in rows] if rows else []
+
+
+# ═══════════════════════════════════════════════════════════════
+# COMMS DOMAIN
+# ═══════════════════════════════════════════════════════════════
+
+from pib import comms as comms_module
+from pib import voice as voice_module
+
+
+@app.get("/api/comms/inbox")
+async def comms_inbox(
+    visibility: str = "normal",
+    needs_response: bool | None = None,
+    urgency: str | None = None,
+    channel: str | None = None,
+    member_id: str | None = None,
+    batch_window: str | None = None,
+    batch_date: str | None = None,
+    draft_status: str | None = None,
+    search: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+):
+    db = await get_db()
+    return await comms_module.get_comms_inbox(
+        db,
+        visibility=visibility,
+        needs_response=needs_response,
+        urgency=urgency,
+        channel=channel,
+        member_id=member_id,
+        batch_window=batch_window,
+        batch_date=batch_date,
+        draft_status=draft_status,
+        search=search,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@app.get("/api/comms/counts")
+async def comms_counts():
+    db = await get_db()
+    return await comms_module.get_comms_counts(db)
+
+
+@app.get("/api/comms/{comm_id}")
+async def comms_detail(comm_id: str):
+    db = await get_db()
+    comm = await comms_module.get_comm_by_id(db, comm_id)
+    if not comm:
+        raise HTTPException(status_code=404, detail="Comm not found")
+    return comm
+
+
+@app.post("/api/comms/{comm_id}/mark-responded")
+async def comms_mark_responded(comm_id: str, request: Request):
+    db = await get_db()
+    body = await request.json() if request.headers.get("content-type") == "application/json" else {}
+    outcome = body.get("outcome", "responded")
+    await comms_module.mark_responded(db, comm_id, outcome)
+    return {"ok": True, "comm_id": comm_id}
+
+
+@app.post("/api/comms/{comm_id}/snooze")
+async def comms_snooze(comm_id: str, request: Request):
+    db = await get_db()
+    body = await request.json()
+    until = body.get("until")
+    if not until:
+        raise HTTPException(status_code=400, detail="'until' datetime required")
+    await comms_module.snooze_comm(db, comm_id, until)
+    return {"ok": True, "comm_id": comm_id, "snoozed_until": until}
+
+
+@app.post("/api/comms/{comm_id}/tag")
+async def comms_tag(comm_id: str, request: Request):
+    db = await get_db()
+    body = await request.json()
+    tag = body.get("tag")
+    if not tag:
+        raise HTTPException(status_code=400, detail="'tag' required")
+    await comms_module.tag_comm(db, comm_id, tag)
+    return {"ok": True, "comm_id": comm_id, "tag": tag}
+
+
+@app.post("/api/comms/{comm_id}/approve-draft")
+async def comms_approve_draft(comm_id: str, request: Request):
+    db = await get_db()
+    body = await request.json() if request.headers.get("content-type") == "application/json" else {}
+    edited_body = body.get("edited_body")
+    result = await comms_module.approve_draft(db, comm_id, edited_body)
+    if not result:
+        raise HTTPException(status_code=400, detail="No pending draft for this comm")
+    return {"ok": True, "comm_id": comm_id, "draft_status": "approved"}
+
+
+@app.post("/api/comms/{comm_id}/reject-draft")
+async def comms_reject_draft(comm_id: str):
+    db = await get_db()
+    await comms_module.reject_draft(db, comm_id)
+    return {"ok": True, "comm_id": comm_id, "draft_status": "rejected"}
+
+
+@app.post("/api/comms/{comm_id}/reply")
+async def comms_reply(comm_id: str, request: Request):
+    db = await get_db()
+    body = await request.json()
+    reply_text = body.get("body")
+    if not reply_text:
+        raise HTTPException(status_code=400, detail="'body' required")
+
+    # Mark original as responded
+    await comms_module.mark_responded(db, comm_id, "responded")
+
+    # Collect voice sample from direct reply
+    comm = await comms_module.get_comm_by_id(db, comm_id)
+    if comm:
+        try:
+            await voice_module.collect_voice_sample(
+                db,
+                member_id=comm.get("member_id", "m-james"),
+                body=reply_text,
+                channel=comm.get("channel", "unknown"),
+                comm_type=comm.get("comm_type"),
+                recipient_type=None,
+                item_ref=comm.get("item_ref"),
+            )
+        except Exception as e:
+            log.warning(f"Voice sample collection failed (non-fatal): {e}")
+
+    return {"ok": True, "comm_id": comm_id, "replied": True}
+
+
+@app.post("/api/comms/{comm_id}/extraction/{index}/approve")
+async def comms_extraction_approve(comm_id: str, index: int):
+    db = await get_db()
+    item = await comms_module.approve_extraction(db, comm_id, index)
+    if not item:
+        raise HTTPException(status_code=400, detail="Invalid comm or extraction index")
+    return {"ok": True, "comm_id": comm_id, "index": index, "item": item}
+
+
+@app.post("/api/comms/{comm_id}/extraction/{index}/reject")
+async def comms_extraction_reject(comm_id: str, index: int):
+    db = await get_db()
+    result = await comms_module.reject_extraction(db, comm_id, index)
+    if not result:
+        raise HTTPException(status_code=400, detail="Invalid comm or extraction index")
+    return {"ok": True, "comm_id": comm_id, "index": index}
+
+
+@app.post("/api/comms/capture")
+async def comms_capture(request: Request):
+    db = await get_db()
+    body = await request.json()
+    member_id = body.get("member_id", "m-james")
+    if "summary" not in body:
+        raise HTTPException(status_code=400, detail="'summary' required")
+    comm_id = await comms_module.capture_manual(db, member_id, body)
+    return {"ok": True, "comm_id": comm_id}
+
+
+@app.get("/api/voice/profiles")
+async def voice_profiles(member: str = "m-james"):
+    db = await get_db()
+    profiles = await voice_module.get_profiles(db, member)
+    stats = await voice_module.get_corpus_stats(db, member)
+    return {"profiles": profiles, "stats": stats}
 
 
 # ═══════════════════════════════════════════════════════════════

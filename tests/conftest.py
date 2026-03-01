@@ -111,7 +111,7 @@ async def seed_test_data(db: aiosqlite.Connection):
         )
 
     # ID sequences
-    for prefix in ["tsk", "mem", "lst", "itm"]:
+    for prefix in ["tsk", "mem", "lst", "itm", "c", "vs", "vp"]:
         await db.execute(
             "INSERT OR IGNORE INTO common_id_sequences (prefix, next_val) VALUES (?, 100)",
             [prefix],
@@ -127,10 +127,20 @@ async def db():
     async with aiosqlite.connect(":memory:") as conn:
         conn.row_factory = aiosqlite.Row
         wrapped = PIBConnection(conn)
-        # Apply schema
+        # Apply schema + migrations
         schema_path = MIGRATIONS_DIR / "001_initial_schema.sql"
         with open(schema_path) as f:
             await wrapped.executescript(f.read())
+        # Apply comms enhancement migration
+        migration_003 = MIGRATIONS_DIR / "003_comms_enhancement.sql"
+        if migration_003.exists():
+            with open(migration_003) as f:
+                await wrapped.executescript(f.read())
+        # Apply voice intelligence migration
+        migration_004 = MIGRATIONS_DIR / "004_voice_intelligence.sql"
+        if migration_004.exists():
+            with open(migration_004) as f:
+                await wrapped.executescript(f.read())
         await seed_test_data(wrapped)
         yield wrapped
 

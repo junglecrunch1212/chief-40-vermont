@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.pib.runtime</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/pib/venv/bin/uvicorn</string>
+        <string>pib.web:app</string>
+        <string>--host</string>
+        <string>0.0.0.0</string>
+        <string>--port</string>
+        <string>3141</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/opt/pib</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PIB_DB_PATH</key>
+        <string>/opt/pib/data/pib.db</string>
+        <key>PIB_LOG_DIR</key>
+        <string>/opt/pib/logs</string>
+        <key>PIB_CORS_ORIGINS</key>
+        <string>https://pib.yourdomain.com</string>
+        <key>PATH</key>
+        <string>/opt/pib/venv/bin:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>ThrottleInterval</key>
+    <integer>5</integer>
+
+    <key>StandardOutPath</key>
+    <string>/opt/pib/logs/pib-stdout.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/opt/pib/logs/pib-stderr.log</string>
+</dict>
+</plist>

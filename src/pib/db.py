@@ -83,11 +83,18 @@ async def get_connection(db_path: str | None = None) -> PIBConnection:
 
 
 async def apply_schema(db: aiosqlite.Connection, schema_path: str | None = None):
-    """Apply the initial schema from migration file."""
+    """Apply the initial schema from migration file and record it as migration 1."""
     path = schema_path or str(MIGRATIONS_DIR / "001_initial_schema.sql")
     with open(path) as f:
         sql = f.read()
     await db.executescript(sql)
+    # Record migration 001 so apply_migrations() doesn't re-apply it
+    checksum = hashlib.sha256(sql.encode()).hexdigest()
+    await db.execute(
+        "INSERT OR IGNORE INTO meta_migrations (version, name, up_sql, down_sql, applied_at, checksum) "
+        "VALUES (?, ?, ?, ?, datetime('now'), ?)",
+        [1, "001_initial_schema.sql", sql, "-- no rollback for initial schema", checksum],
+    )
     await db.commit()
 
 

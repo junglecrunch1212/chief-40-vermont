@@ -144,14 +144,34 @@ async def ingest(event: IngestEvent, db, event_bus=None) -> list[dict]:
             await db.commit()
             return actions
 
-    # STAGE 4-8: Route through full pipeline
-    # (Placeholder for full classification + LLM routing)
-    if event.text:
-        actions.append({
-            "action": "queued_for_processing",
-            "text": event.text,
-            "member_id": event.member_id,
-        })
+    # STAGE 4-8: Route through LLM for classification + response
+    if event.text and event.member_id:
+        channel = event.reply_channel or event.source
+        try:
+            from pib.llm import chat as llm_chat
+            result = await llm_chat(db, event.text, event.member_id, channel)
+            actions.append({
+                "action": "llm_response",
+                "response": result.get("response", ""),
+                "session_id": result.get("session_id"),
+                "tool_actions": result.get("actions", []),
+            })
+            # Queue outbound reply if there's a reply channel
+            if event.reply_channel and event.reply_address and result.get("response"):
+                actions.append({
+                    "action": "outbound_reply",
+                    "channel": event.reply_channel,
+                    "to": event.reply_address,
+                    "content": result["response"],
+                })
+        except Exception as e:
+            log.error(f"LLM processing failed for ingest: {e}", exc_info=True)
+            actions.append({
+                "action": "queued_for_processing",
+                "text": event.text,
+                "member_id": event.member_id,
+                "error": str(e),
+            })
 
     await db.commit()
     return actions

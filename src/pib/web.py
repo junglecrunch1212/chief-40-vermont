@@ -468,15 +468,16 @@ window.onload=async()=>{
 # ═══════════════════════════════════════════════════════════════
 
 @app.post("/api/chat")
-async def chat(request: Request):
-    """Handle a chat message. Returns streamed or non-streamed response."""
+async def chat_endpoint(request: Request):
+    """Handle a chat message with full LLM integration. Falls back to Layer 1 if API unavailable."""
     db = await get_db()
     body = await request.json()
     message = body.get("message", "")
     member_id = body.get("member_id", "m-james")
     channel = body.get("channel", "web")
+    session_id = body.get("session_id")
 
-    # Check for prefix commands first
+    # Check for prefix commands first (Layer 1 — no LLM needed)
     from pib.ingest import parse_prefix
     prefix_result = parse_prefix(message)
     if prefix_result:
@@ -493,18 +494,58 @@ async def chat(request: Request):
         await db.commit()
         return {"response": json.dumps(result), "actions": [result]}
 
-    # For non-prefix messages, use deterministic fallback
-    # (Full LLM flow would go here)
-    snapshot = await load_snapshot(db, member_id)
-    wn = what_now(member_id, snapshot)
+    # Full LLM conversation flow (Layer 2 with Layer 1 fallback)
+    from pib.llm import chat as llm_chat
+    result = await llm_chat(db, message, member_id, channel, session_id)
+    return result
 
-    response = f"I hear you. "
-    if wn.the_one_task:
-        response += f"Your next task: {wn.the_one_task['title']}"
-        if wn.the_one_task.get("micro_script"):
-            response += f"\n{wn.the_one_task['micro_script']}"
 
-    return {"response": response, "actions": []}
+@app.post("/api/chat/send")
+async def chat_send(request: Request):
+    """Send a chat message. Returns session_id for streaming via /api/chat/stream."""
+    db = await get_db()
+    body = await request.json()
+    message = body.get("message", body.get("text", ""))
+    member_id = body.get("member_id", "m-james")
+    channel = body.get("channel", "web")
+    session_id = body.get("session_id")
+
+    from pib.llm import chat as llm_chat
+    result = await llm_chat(db, message, member_id, channel, session_id)
+    return result
+
+
+@app.get("/api/chat/stream")
+async def chat_stream(
+    session_id: str | None = None,
+    member_id: str = "m-james",
+    message: str = "",
+    channel: str = "web",
+):
+    """SSE streaming endpoint for chat. Connect and send message via query params."""
+    db = await get_db()
+
+    if not message:
+        return JSONResponse(400, {"error": "message parameter required"})
+
+    from pib.llm import stream_chat
+    return StreamingResponse(
+        stream_chat(db, message, member_id, channel, session_id),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.get("/api/chat/history")
+async def chat_history(session_id: str):
+    """Get conversation history for a session."""
+    db = await get_db()
+    rows = await db.execute_fetchall(
+        "SELECT role, content, tool_calls, model, tokens_in, tokens_out, created_at "
+        "FROM mem_messages WHERE session_id = ? ORDER BY created_at",
+        [session_id],
+    )
+    return [dict(r) for r in rows] if rows else []
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -743,6 +784,424 @@ async def get_streaks(member_id: str):
         "SELECT * FROM ops_streaks WHERE member_id = ?", [member_id]
     )
     return [dict(r) for r in rows] if rows else []
+
+
+# ═══════════════════════════════════════════════════════════════
+# TODAY STREAM (James carousel — SSE)
+# ═══════════════════════════════════════════════════════════════
+
+@app.get("/api/today-stream")
+async def today_stream(member_id: str = "m-james"):
+    """SSE stream of whatNow + calendar + custody for the Today page carousel."""
+    db = await get_db()
+
+    snapshot = await load_snapshot(db, member_id)
+    wn = what_now(member_id, snapshot)
+
+    from pib.llm import build_calendar_context
+    today = date.today().isoformat()
+    calendar = await build_calendar_context(db, today, today, member_id)
+
+    from pib.custody import who_has_child
+    config_row = await db.execute_fetchone(
+        "SELECT * FROM common_custody_configs WHERE active = 1 LIMIT 1"
+    )
+    custody = None
+    if config_row:
+        parent_id = who_has_child(date.today(), dict(config_row))
+        parent = await db.execute_fetchone("SELECT display_name FROM common_members WHERE id = ?", [parent_id])
+        custody = {"parent_id": parent_id, "parent_name": parent["display_name"] if parent else parent_id}
+
+    streak_row = await db.execute_fetchone(
+        "SELECT current_streak FROM ops_streaks WHERE member_id = ? AND streak_type = 'daily_completion'",
+        [member_id],
+    )
+
+    return {
+        "the_one_task": wn.the_one_task,
+        "context": wn.context,
+        "energy_level": wn.energy_level,
+        "calendar_status": wn.calendar_status,
+        "one_more_teaser": wn.one_more_teaser,
+        "completions_today": wn.completions_today,
+        "velocity_cap": wn.velocity_cap,
+        "calendar": calendar,
+        "custody": custody,
+        "streak": streak_row["current_streak"] if streak_row else 0,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════
+# TASK SKIP
+# ═══════════════════════════════════════════════════════════════
+
+@app.post("/api/tasks/{task_id}/skip")
+async def skip_task(task_id: str, request: Request):
+    """Skip a task — defers it to tomorrow."""
+    db = await get_db()
+    body = await request.json() if request.headers.get("content-type") == "application/json" else {}
+    from pib.engine import transition_task
+    tomorrow = (date.today().replace(day=date.today().day + 1)).isoformat()
+    result = await transition_task(
+        db, task_id, "deferred",
+        {"scheduled_date": body.get("scheduled_date", tomorrow),
+         "notes": body.get("notes", "Skipped")},
+        body.get("actor", "user"),
+    )
+    return result
+
+
+# ═══════════════════════════════════════════════════════════════
+# DECISIONS (Laura's queue)
+# ═══════════════════════════════════════════════════════════════
+
+@app.get("/api/decisions")
+async def get_decisions(member_id: str = "m-laura"):
+    """Get pending decisions/approvals for a member."""
+    db = await get_db()
+    rows = await db.execute_fetchall(
+        "SELECT * FROM mem_approval_queue WHERE (requested_by = ? OR status = 'pending') "
+        "ORDER BY CASE WHEN status = 'pending' THEN 0 ELSE 1 END, requested_at DESC",
+        [member_id],
+    )
+    return [dict(r) for r in rows] if rows else []
+
+
+# ═══════════════════════════════════════════════════════════════
+# CHORES (Charlie's system)
+# ═══════════════════════════════════════════════════════════════
+
+@app.get("/api/chores")
+async def get_chores(member_id: str = "m-charlie"):
+    """Get chores for a member (typically Charlie)."""
+    db = await get_db()
+    rows = await db.execute_fetchall(
+        "SELECT * FROM ops_tasks WHERE assignee = ? AND item_type = 'chore' "
+        "AND status NOT IN ('done', 'dismissed') ORDER BY due_date",
+        [member_id],
+    )
+    return [dict(r) for r in rows] if rows else []
+
+
+@app.post("/api/chores/{chore_id}/toggle")
+async def toggle_chore(chore_id: str):
+    """Toggle a chore done/not-done (simplified for child UI)."""
+    db = await get_db()
+    row = await db.execute_fetchone("SELECT status FROM ops_tasks WHERE id = ?", [chore_id])
+    if not row:
+        raise HTTPException(404, "Chore not found")
+
+    if row["status"] == "done":
+        await db.execute(
+            "UPDATE ops_tasks SET status = 'next', completed_at = NULL, completed_by = NULL WHERE id = ?",
+            [chore_id],
+        )
+    else:
+        from pib.rewards import complete_task_with_reward
+        await complete_task_with_reward(db, chore_id, "m-charlie", "m-charlie")
+
+    await db.commit()
+    updated = await db.execute_fetchone("SELECT * FROM ops_tasks WHERE id = ?", [chore_id])
+    return dict(updated)
+
+
+# ═══════════════════════════════════════════════════════════════
+# HOUSEHOLD STATUS (aggregate dashboard)
+# ═══════════════════════════════════════════════════════════════
+
+@app.get("/api/household-status")
+async def household_status():
+    """Aggregate household status for the home page."""
+    db = await get_db()
+
+    from pib.custody import who_has_child
+    config_row = await db.execute_fetchone(
+        "SELECT * FROM common_custody_configs WHERE active = 1 LIMIT 1"
+    )
+    custody = None
+    if config_row:
+        parent_id = who_has_child(date.today(), dict(config_row))
+        custody = parent_id
+
+    tasks_row = await db.execute_fetchone(
+        "SELECT COUNT(*) as total, "
+        "SUM(CASE WHEN status = 'done' AND completed_at >= date('now') THEN 1 ELSE 0 END) as done_today, "
+        "SUM(CASE WHEN due_date < date('now') AND status NOT IN ('done','dismissed','deferred') THEN 1 ELSE 0 END) as overdue "
+        "FROM ops_tasks WHERE status NOT IN ('done','dismissed')"
+    )
+
+    budget_row = await db.execute_fetchone(
+        "SELECT COUNT(*) as alerts FROM fin_budget_snapshot WHERE over_threshold = 1"
+    )
+
+    conflicts_row = await db.execute_fetchone(
+        "SELECT COUNT(*) as c FROM cal_conflicts WHERE status = 'unresolved'"
+    )
+
+    members = await db.execute_fetchall(
+        "SELECT m.id, m.display_name, s.current_streak FROM common_members m "
+        "LEFT JOIN ops_streaks s ON m.id = s.member_id AND s.streak_type = 'daily_completion' "
+        "WHERE m.active = 1 AND m.role IN ('parent', 'child')"
+    )
+
+    phase = await db.execute_fetchone(
+        "SELECT name, status FROM common_life_phases WHERE status = 'active' LIMIT 1"
+    )
+
+    return {
+        "custody_today": custody,
+        "tasks": {
+            "active": tasks_row["total"] if tasks_row else 0,
+            "done_today": tasks_row["done_today"] if tasks_row else 0,
+            "overdue": tasks_row["overdue"] if tasks_row else 0,
+        },
+        "budget_alerts": budget_row["alerts"] if budget_row else 0,
+        "unresolved_conflicts": conflicts_row["c"] if conflicts_row else 0,
+        "members": [{"id": m["id"], "name": m["display_name"], "streak": m["current_streak"] or 0} for m in members] if members else [],
+        "active_phase": dict(phase) if phase else None,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════
+# PEOPLE (Contacts, Comms, Observations, Autonomy)
+# ═══════════════════════════════════════════════════════════════
+
+@app.get("/api/people/contacts")
+async def get_contacts():
+    db = await get_db()
+    rows = await db.execute_fetchall(
+        "SELECT * FROM ops_items WHERE type = 'person' AND status = 'active' ORDER BY name"
+    )
+    return [dict(r) for r in rows] if rows else []
+
+
+@app.get("/api/people/comms")
+async def get_people_comms(limit: int = 20):
+    db = await get_db()
+    rows = await db.execute_fetchall(
+        "SELECT * FROM ops_comms ORDER BY date DESC LIMIT ?", [limit]
+    )
+    return [dict(r) for r in rows] if rows else []
+
+
+@app.get("/api/people/observations")
+async def get_observations():
+    db = await get_db()
+    rows = await db.execute_fetchall(
+        "SELECT * FROM mem_long_term WHERE category = 'observations' AND superseded_by IS NULL "
+        "ORDER BY created_at DESC LIMIT 50"
+    )
+    return [dict(r) for r in rows] if rows else []
+
+
+@app.get("/api/people/autonomy-tiers")
+async def get_autonomy_tiers():
+    db = await get_db()
+    rows = await db.execute_fetchall(
+        "SELECT id, name, type, autonomy_tier FROM ops_items WHERE type = 'person' AND autonomy_tier IS NOT NULL "
+        "ORDER BY autonomy_tier, name"
+    )
+    return [dict(r) for r in rows] if rows else []
+
+
+# ═══════════════════════════════════════════════════════════════
+# COSTS / SOURCES / PHASES (Settings)
+# ═══════════════════════════════════════════════════════════════
+
+@app.get("/api/costs")
+async def get_costs():
+    db = await get_db()
+    monthly_spend = await get_config(db, "api_cost_this_month") or "0"
+    monthly_budget = await get_config(db, "monthly_api_budget") or "30"
+    return {
+        "this_month": float(monthly_spend),
+        "budget": float(monthly_budget),
+        "percentage": round(float(monthly_spend) / float(monthly_budget) * 100, 1) if float(monthly_budget) > 0 else 0,
+    }
+
+
+@app.get("/api/sources")
+async def get_sources():
+    db = await get_db()
+    rows = await db.execute_fetchall("SELECT * FROM cal_sources ORDER BY source_name")
+    return [dict(r) for r in rows] if rows else []
+
+
+@app.get("/api/phases")
+async def get_phases():
+    db = await get_db()
+    rows = await db.execute_fetchall("SELECT * FROM common_life_phases ORDER BY start_date")
+    return [dict(r) for r in rows] if rows else []
+
+
+# ═══════════════════════════════════════════════════════════════
+# COMMS DOMAIN
+# ═══════════════════════════════════════════════════════════════
+
+from pib import comms as comms_module
+from pib import voice as voice_module
+
+
+@app.get("/api/comms/inbox")
+async def comms_inbox(
+    visibility: str = "normal",
+    needs_response: bool | None = None,
+    urgency: str | None = None,
+    channel: str | None = None,
+    member_id: str | None = None,
+    batch_window: str | None = None,
+    batch_date: str | None = None,
+    draft_status: str | None = None,
+    search: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+):
+    db = await get_db()
+    return await comms_module.get_comms_inbox(
+        db,
+        visibility=visibility,
+        needs_response=needs_response,
+        urgency=urgency,
+        channel=channel,
+        member_id=member_id,
+        batch_window=batch_window,
+        batch_date=batch_date,
+        draft_status=draft_status,
+        search=search,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@app.get("/api/comms/counts")
+async def comms_counts():
+    db = await get_db()
+    return await comms_module.get_comms_counts(db)
+
+
+@app.get("/api/comms/{comm_id}")
+async def comms_detail(comm_id: str):
+    db = await get_db()
+    comm = await comms_module.get_comm_by_id(db, comm_id)
+    if not comm:
+        raise HTTPException(status_code=404, detail="Comm not found")
+    return comm
+
+
+@app.post("/api/comms/{comm_id}/mark-responded")
+async def comms_mark_responded(comm_id: str, request: Request):
+    db = await get_db()
+    body = await request.json() if request.headers.get("content-type") == "application/json" else {}
+    outcome = body.get("outcome", "responded")
+    await comms_module.mark_responded(db, comm_id, outcome)
+    return {"ok": True, "comm_id": comm_id}
+
+
+@app.post("/api/comms/{comm_id}/snooze")
+async def comms_snooze(comm_id: str, request: Request):
+    db = await get_db()
+    body = await request.json()
+    until = body.get("until")
+    if not until:
+        raise HTTPException(status_code=400, detail="'until' datetime required")
+    await comms_module.snooze_comm(db, comm_id, until)
+    return {"ok": True, "comm_id": comm_id, "snoozed_until": until}
+
+
+@app.post("/api/comms/{comm_id}/tag")
+async def comms_tag(comm_id: str, request: Request):
+    db = await get_db()
+    body = await request.json()
+    tag = body.get("tag")
+    if not tag:
+        raise HTTPException(status_code=400, detail="'tag' required")
+    await comms_module.tag_comm(db, comm_id, tag)
+    return {"ok": True, "comm_id": comm_id, "tag": tag}
+
+
+@app.post("/api/comms/{comm_id}/approve-draft")
+async def comms_approve_draft(comm_id: str, request: Request):
+    db = await get_db()
+    body = await request.json() if request.headers.get("content-type") == "application/json" else {}
+    edited_body = body.get("edited_body")
+    result = await comms_module.approve_draft(db, comm_id, edited_body)
+    if not result:
+        raise HTTPException(status_code=400, detail="No pending draft for this comm")
+    return {"ok": True, "comm_id": comm_id, "draft_status": "approved"}
+
+
+@app.post("/api/comms/{comm_id}/reject-draft")
+async def comms_reject_draft(comm_id: str):
+    db = await get_db()
+    await comms_module.reject_draft(db, comm_id)
+    return {"ok": True, "comm_id": comm_id, "draft_status": "rejected"}
+
+
+@app.post("/api/comms/{comm_id}/reply")
+async def comms_reply(comm_id: str, request: Request):
+    db = await get_db()
+    body = await request.json()
+    reply_text = body.get("body")
+    if not reply_text:
+        raise HTTPException(status_code=400, detail="'body' required")
+
+    # Mark original as responded
+    await comms_module.mark_responded(db, comm_id, "responded")
+
+    # Collect voice sample from direct reply
+    comm = await comms_module.get_comm_by_id(db, comm_id)
+    if comm:
+        try:
+            await voice_module.collect_voice_sample(
+                db,
+                member_id=comm.get("member_id", "m-james"),
+                body=reply_text,
+                channel=comm.get("channel", "unknown"),
+                comm_type=comm.get("comm_type"),
+                recipient_type=None,
+                item_ref=comm.get("item_ref"),
+            )
+        except Exception as e:
+            log.warning(f"Voice sample collection failed (non-fatal): {e}")
+
+    return {"ok": True, "comm_id": comm_id, "replied": True}
+
+
+@app.post("/api/comms/{comm_id}/extraction/{index}/approve")
+async def comms_extraction_approve(comm_id: str, index: int):
+    db = await get_db()
+    item = await comms_module.approve_extraction(db, comm_id, index)
+    if not item:
+        raise HTTPException(status_code=400, detail="Invalid comm or extraction index")
+    return {"ok": True, "comm_id": comm_id, "index": index, "item": item}
+
+
+@app.post("/api/comms/{comm_id}/extraction/{index}/reject")
+async def comms_extraction_reject(comm_id: str, index: int):
+    db = await get_db()
+    result = await comms_module.reject_extraction(db, comm_id, index)
+    if not result:
+        raise HTTPException(status_code=400, detail="Invalid comm or extraction index")
+    return {"ok": True, "comm_id": comm_id, "index": index}
+
+
+@app.post("/api/comms/capture")
+async def comms_capture(request: Request):
+    db = await get_db()
+    body = await request.json()
+    member_id = body.get("member_id", "m-james")
+    if "summary" not in body:
+        raise HTTPException(status_code=400, detail="'summary' required")
+    comm_id = await comms_module.capture_manual(db, member_id, body)
+    return {"ok": True, "comm_id": comm_id}
+
+
+@app.get("/api/voice/profiles")
+async def voice_profiles(member: str = "m-james"):
+    db = await get_db()
+    profiles = await voice_module.get_profiles(db, member)
+    stats = await voice_module.get_corpus_stats(db, member)
+    return {"profiles": profiles, "stats": stats}
 
 
 # ═══════════════════════════════════════════════════════════════

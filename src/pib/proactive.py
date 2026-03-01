@@ -109,6 +109,71 @@ PROACTIVE_TRIGGERS = [
             "SELECT category, pct_used FROM fin_budget_snapshot WHERE over_threshold = 1"
         ),
     },
+    # ─── Comms Domain Triggers ───
+    {
+        "name": "comm_batch_morning",
+        "priority": 4,
+        "cooldown_minutes": 1440,
+        "query": (
+            "SELECT COUNT(*) as c FROM ops_comms "
+            "WHERE batch_window = 'morning' AND batch_date = date('now') "
+            "AND visibility = 'normal' AND needs_response = 1"
+        ),
+        "batch_window": "morning",
+    },
+    {
+        "name": "comm_batch_midday",
+        "priority": 5,
+        "cooldown_minutes": 1440,
+        "query": (
+            "SELECT COUNT(*) as c FROM ops_comms "
+            "WHERE batch_window = 'midday' AND batch_date = date('now') "
+            "AND visibility = 'normal' AND needs_response = 1"
+        ),
+        "batch_window": "midday",
+    },
+    {
+        "name": "comm_batch_evening",
+        "priority": 5,
+        "cooldown_minutes": 1440,
+        "query": (
+            "SELECT COUNT(*) as c FROM ops_comms "
+            "WHERE batch_window = 'evening' AND batch_date = date('now') "
+            "AND visibility = 'normal' AND needs_response = 1"
+        ),
+        "batch_window": "evening",
+    },
+    {
+        "name": "comm_urgent_inbound",
+        "priority": 2,
+        "cooldown_minutes": 60,
+        "query": (
+            "SELECT * FROM ops_comms "
+            "WHERE response_urgency = 'urgent' AND needs_response = 1 "
+            "AND visibility = 'normal' "
+            "AND created_at >= datetime('now', '-1 hour')"
+        ),
+    },
+    {
+        "name": "comm_draft_stale",
+        "priority": 6,
+        "cooldown_minutes": 480,
+        "query": (
+            "SELECT * FROM ops_comms "
+            "WHERE draft_status = 'pending' "
+            "AND created_at <= datetime('now', '-4 hours')"
+        ),
+    },
+    {
+        "name": "comm_response_overdue",
+        "priority": 5,
+        "cooldown_minutes": 1440,
+        "query": (
+            "SELECT * FROM ops_comms "
+            "WHERE needs_response = 1 AND visibility = 'normal' "
+            "AND date <= date('now', '-2 days') AND outcome = 'pending'"
+        ),
+    },
 ]
 
 
@@ -136,10 +201,23 @@ async def scan_triggers(db, member_id: str) -> list[dict]:
         if "hour" in trigger and now.hour != trigger["hour"]:
             continue
 
+        # Check batch window time condition (for comms batch triggers)
+        if "batch_window" in trigger:
+            from pib.comms import get_batch_config
+            batch_config = await get_batch_config(db)
+            window_name = trigger["batch_window"]
+            window_start = batch_config[window_name]["start"]
+            window_end = batch_config[window_name]["end"]
+            if not (window_start <= now.time() <= window_end):
+                continue
+
         # Check query condition
         if "query" in trigger:
             result = await db.execute_fetchone(trigger["query"])
             if result:
+                # For COUNT queries, only fire if count > 0
+                if "c" in dict(result) and result["c"] == 0:
+                    continue
                 fired.append({"trigger": trigger["name"], "data": dict(result)})
 
     return fired

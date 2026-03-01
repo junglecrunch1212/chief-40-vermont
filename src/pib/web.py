@@ -4,15 +4,20 @@ import json
 import logging
 import logging.handlers
 import os
+import time
 from contextlib import asynccontextmanager
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import aiosqlite
+from dotenv import load_dotenv
+
+load_dotenv()
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+from pib.auth import auth_middleware, validate_bluebubbles_secret, validate_siri_token, validate_twilio_signature
 from pib.db import apply_migrations, apply_schema, get_config, get_connection, next_id, set_config
 from pib.engine import (
     DBSnapshot,
@@ -54,6 +59,8 @@ def setup_logging():
         ))
         root.addHandler(file_handler)
 
+
+_app_start_time = time.time()
 
 # ─── Database singleton ───
 _db: aiosqlite.Connection | None = None
@@ -98,6 +105,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from starlette.middleware.base import BaseHTTPMiddleware
+app.add_middleware(BaseHTTPMiddleware, dispatch=auth_middleware)
+
 # Mount static files if directory exists
 static_dir = os.path.join(os.path.dirname(__file__), "..", "..", "static")
 if os.path.isdir(static_dir):
@@ -114,16 +124,32 @@ async def health_probe():
     db = await get_db()
     checks = {}
 
+    # Database check
     try:
         row = await db.execute_fetchone("SELECT COUNT(*) as c FROM common_members WHERE active=1")
-        checks["db"] = {"ok": True, "members": row["c"] if row else 0}
+        checks["database"] = {"ok": True, "members": row["c"] if row else 0}
     except Exception as e:
-        checks["db"] = {"ok": False, "error": str(e)}
+        checks["database"] = {"ok": False, "error": str(e)}
 
+    # Write queue (always ok for now — WriteQueue is in-process)
+    checks["write_queue"] = {"ok": True, "pending": 0}
+
+    # DB size
+    db_path = os.environ.get("PIB_DB_PATH", "pib.db")
+    db_size_mb = 0
+    if os.path.exists(db_path):
+        db_size_mb = round(os.path.getsize(db_path) / (1024 * 1024), 1)
+
+    uptime_minutes = int((time.time() - _app_start_time) / 60)
     all_ok = all(c.get("ok", False) for c in checks.values())
     return JSONResponse(
         status_code=200 if all_ok else 503,
-        content={"status": "healthy" if all_ok else "degraded", "checks": checks},
+        content={
+            "status": "healthy" if all_ok else "degraded",
+            "uptime": uptime_minutes,
+            "checks": checks,
+            "dbSize": f"{db_size_mb} MB",
+        },
     )
 
 
@@ -473,12 +499,48 @@ async def scoreboard_data():
             "next_task": wn.the_one_task.get("title") if wn.the_one_task else None,
         })
 
+    # Reward history (recent variable-ratio rewards from pib_reward_log)
+    reward_rows = await db.execute_fetchall(
+        "SELECT reward_tier, reward_text, created_at FROM pib_reward_log "
+        "WHERE created_at >= date('now') "
+        "ORDER BY created_at DESC LIMIT 5"
+    )
+    reward_history = [
+        {"tier": r["reward_tier"], "msg": r["reward_text"] or "", "ts": r["created_at"]}
+        for r in (reward_rows or [])
+    ]
+
+    # Domain wins (completion counts + trends)
+    domain_rows = await db.execute_fetchall(
+        "SELECT domain, COUNT(*) as n FROM ops_tasks "
+        "WHERE status = 'done' AND completed_at >= date('now', '-7 days') AND domain IS NOT NULL "
+        "GROUP BY domain ORDER BY n DESC"
+    )
+    domain_wins = [
+        {"d": r["domain"].title() if r["domain"] else "Other", "n": r["n"], "trend": ""}
+        for r in (domain_rows or [])
+    ]
+
     # Family total
-    total_week = sum(c["week_count"] for c in cards)
+    total_week = sum(c["week_points"] for c in cards)
+
+    # Charlie's chores for the scoreboard
+    chore_rows = await db.execute_fetchall(
+        "SELECT id, title, status, COALESCE(points, 1) as stars FROM ops_tasks "
+        "WHERE assignee = 'm-charlie' AND item_type = 'chore' AND (due_date IS NULL OR due_date >= date('now', '-1 day')) "
+        "ORDER BY due_date LIMIT 10"
+    )
+    chores = [
+        {"id": r["id"], "title": r["title"], "done": r["status"] == "done", "stars": r["stars"]}
+        for r in (chore_rows or [])
+    ]
 
     return {
         "cards": cards,
-        "family_total_week": total_week,
+        "rewardHistory": reward_history,
+        "domainWins": domain_wins,
+        "familyTotal": {"points": total_week, "record": False},
+        "chores": chores,
     }
 
 
@@ -602,14 +664,16 @@ async def get_custody(query_date: str | None = None):
         "SELECT * FROM common_custody_configs WHERE active = 1 LIMIT 1"
     )
     if not config_row:
-        return {"date": qdate.isoformat(), "custody": "no_config"}
+        return {"text": "No custody config", "with": None, "overnight": None}
 
     parent_id = who_has_child(qdate, dict(config_row))
+    child_name = config_row["child_id"].replace("m-", "").title()
     member = await db.execute_fetchone("SELECT display_name FROM common_members WHERE id = ?", [parent_id])
+    parent_name = member["display_name"] if member else parent_id
     return {
-        "date": qdate.isoformat(),
-        "parent_id": parent_id,
-        "parent_name": member["display_name"] if member else parent_id,
+        "text": f"{child_name} with {parent_name} today",
+        "with": parent_id,
+        "overnight": parent_id,
     }
 
 
@@ -677,8 +741,12 @@ async def update_config(key: str, request: Request):
 @app.post("/webhooks/twilio")
 async def twilio_webhook(request: Request):
     """Handle inbound Twilio SMS."""
-    db = await get_db()
     form = await request.form()
+    signature = request.headers.get("X-Twilio-Signature", "")
+    request_url = str(request.url)
+    if not validate_twilio_signature(request_url, dict(form), signature):
+        raise HTTPException(status_code=403, detail="Invalid Twilio signature")
+    db = await get_db()
     from pib.ingest import IngestEvent, ingest, make_idempotency_key
 
     event = IngestEvent(
@@ -698,8 +766,11 @@ async def twilio_webhook(request: Request):
 @app.post("/webhooks/bluebubbles")
 async def bluebubbles_webhook(request: Request):
     """Handle inbound BlueBubbles iMessage."""
-    db = await get_db()
     body = await request.json()
+    secret = body.get("password", request.headers.get("X-BlueBubbles-Secret", ""))
+    if not validate_bluebubbles_secret(secret):
+        raise HTTPException(status_code=403, detail="Invalid BlueBubbles secret")
+    db = await get_db()
     from pib.ingest import IngestEvent, ingest, make_idempotency_key
 
     event = IngestEvent(
@@ -719,6 +790,9 @@ async def bluebubbles_webhook(request: Request):
 @app.post("/webhooks/siri")
 async def siri_webhook(request: Request):
     """Handle inbound Siri Shortcut."""
+    auth_header = request.headers.get("Authorization", "")
+    if not validate_siri_token(auth_header):
+        raise HTTPException(status_code=403, detail="Invalid Siri token")
     db = await get_db()
     body = await request.json()
     from pib.ingest import IngestEvent, ingest, make_idempotency_key
@@ -832,42 +906,109 @@ async def get_streaks(member_id: str):
 
 @app.get("/api/today-stream")
 async def today_stream(member_id: str = "m-james"):
-    """SSE stream of whatNow + calendar + custody for the Today page carousel."""
+    """Today page data: stream array, energy, streak, summary."""
     db = await get_db()
 
     snapshot = await load_snapshot(db, member_id)
     wn = what_now(member_id, snapshot)
 
-    from pib.llm import build_calendar_context
-    today = date.today().isoformat()
-    calendar = await build_calendar_context(db, today, today, member_id)
+    today_str = date.today().isoformat()
 
+    # Query calendar events directly for structured data
+    cal_events = await db.execute_fetchall(
+        "SELECT start_time, end_time, title, privacy, title_redacted FROM cal_classified_events "
+        "WHERE event_date = ? ORDER BY start_time",
+        [today_str],
+    )
+
+    # Build unified stream array
+    stream = []
+    # Endowed items (always-done "you showed up" items)
+    stream.append({"id": "endowed-1", "type": "endowed", "title": "Woke up", "label": "Woke up", "state": "done"})
+    stream.append({"id": "endowed-2", "type": "endowed", "title": "Opened PIB", "label": "Opened PIB", "state": "done"})
+
+    # Calendar events
+    now_str = datetime.now().strftime("%H:%M")
+    for i, evt in enumerate(cal_events or []):
+        evt_title = evt["title"] if evt["privacy"] == "full" else (evt.get("title_redacted") or "[unavailable]")
+        start = evt.get("start_time", "")
+        end = evt.get("end_time", "")
+        stream.append({
+            "id": f"cal-{start or i}",
+            "type": "calendar",
+            "title": evt_title,
+            "time": start,
+            "end": end,
+            "label": f"{start} {evt_title}".strip(),
+            "state": "done" if (start and start < now_str) else "pending",
+        })
+
+    # Tasks from whatNow
+    active_idx = len(stream)  # First pending task
+    for t in (snapshot.tasks or []):
+        if t.get("status") in ("done", "dismissed"):
+            continue
+        is_the_one = wn.the_one_task and t.get("id") == wn.the_one_task.get("id")
+        stream.append({
+            "id": t["id"],
+            "type": "task",
+            "title": t.get("title", ""),
+            "label": t.get("title", ""),
+            "state": "pending",
+            "urgent": bool(t.get("due_date") and t["due_date"] <= today_str),
+            "task": {
+                "id": t["id"],
+                "domain": t.get("domain"),
+                "effort": t.get("effort"),
+                "points": t.get("points", 1),
+                "micro": t.get("micro_script"),
+            },
+        })
+
+    # Energy state
+    energy_row = await db.execute_fetchone(
+        "SELECT * FROM pib_energy_states WHERE member_id = ? AND state_date = date('now')",
+        [member_id],
+    )
+    energy = {
+        "level": wn.energy_level or "medium",
+        "sleep": energy_row["sleep_quality"] if energy_row else None,
+        "meds": bool(energy_row["meds_taken"]) if energy_row else False,
+        "meds_at": energy_row["meds_taken_at"] if energy_row else None,
+        "completions": wn.completions_today,
+        "cap": wn.velocity_cap,
+        "focus": bool(energy_row["focus_mode"]) if energy_row else False,
+    }
+
+    # Streak
+    streak_row = await db.execute_fetchone(
+        "SELECT current_streak, best_streak FROM ops_streaks WHERE member_id = ? AND streak_type = 'daily_completion'",
+        [member_id],
+    )
+    streak = {
+        "current": streak_row["current_streak"] if streak_row else 0,
+        "best": streak_row["best_streak"] if streak_row else 0,
+        "grace": 2,
+    }
+
+    # Custody summary for the summary line
     from pib.custody import who_has_child
     config_row = await db.execute_fetchone(
         "SELECT * FROM common_custody_configs WHERE active = 1 LIMIT 1"
     )
-    custody = None
+    summary_parts = []
     if config_row:
         parent_id = who_has_child(date.today(), dict(config_row))
         parent = await db.execute_fetchone("SELECT display_name FROM common_members WHERE id = ?", [parent_id])
-        custody = {"parent_id": parent_id, "parent_name": parent["display_name"] if parent else parent_id}
-
-    streak_row = await db.execute_fetchone(
-        "SELECT current_streak FROM ops_streaks WHERE member_id = ? AND streak_type = 'daily_completion'",
-        [member_id],
-    )
+        child_name = config_row["child_id"].replace("m-", "").title()
+        summary_parts.append(f"{child_name}'s with {parent['display_name'] if parent else parent_id} today.")
 
     return {
-        "the_one_task": wn.the_one_task,
-        "context": wn.context,
-        "energy_level": wn.energy_level,
-        "calendar_status": wn.calendar_status,
-        "one_more_teaser": wn.one_more_teaser,
-        "completions_today": wn.completions_today,
-        "velocity_cap": wn.velocity_cap,
-        "calendar": calendar,
-        "custody": custody,
-        "streak": streak_row["current_streak"] if streak_row else 0,
+        "stream": stream,
+        "activeIdx": active_idx,
+        "energy": energy,
+        "streak": streak,
+        "summary": " ".join(summary_parts) if summary_parts else None,
     }
 
 
@@ -881,7 +1022,7 @@ async def skip_task(task_id: str, request: Request):
     db = await get_db()
     body = await request.json() if request.headers.get("content-type") == "application/json" else {}
     from pib.engine import transition_task
-    tomorrow = (date.today().replace(day=date.today().day + 1)).isoformat()
+    tomorrow = (date.today() + timedelta(days=1)).isoformat()
     result = await transition_task(
         db, task_id, "deferred",
         {"scheduled_date": body.get("scheduled_date", tomorrow),
@@ -916,11 +1057,17 @@ async def get_chores(member_id: str = "m-charlie"):
     """Get chores for a member (typically Charlie)."""
     db = await get_db()
     rows = await db.execute_fetchall(
-        "SELECT * FROM ops_tasks WHERE assignee = ? AND item_type = 'chore' "
-        "AND status NOT IN ('done', 'dismissed') ORDER BY due_date",
+        "SELECT id, title, status, COALESCE(points, 1) as stars FROM ops_tasks "
+        "WHERE assignee = ? AND item_type = 'chore' "
+        "AND (status NOT IN ('dismissed') AND (due_date IS NULL OR due_date >= date('now'))) "
+        "ORDER BY due_date",
         [member_id],
     )
-    return [dict(r) for r in rows] if rows else []
+    chores = [
+        {"id": r["id"], "title": r["title"], "done": r["status"] == "done", "stars": r["stars"]}
+        for r in (rows or [])
+    ]
+    return {"chores": chores}
 
 
 @app.post("/api/chores/{chore_id}/toggle")
@@ -941,8 +1088,22 @@ async def toggle_chore(chore_id: str):
         await complete_task_with_reward(db, chore_id, "m-charlie", "m-charlie")
 
     await db.commit()
-    updated = await db.execute_fetchone("SELECT * FROM ops_tasks WHERE id = ?", [chore_id])
-    return dict(updated)
+    updated = await db.execute_fetchone("SELECT status, COALESCE(points, 1) as stars FROM ops_tasks WHERE id = ?", [chore_id])
+    # Count stars today and this week for the response
+    stars_today_row = await db.execute_fetchone(
+        "SELECT COALESCE(SUM(points), 0) as s FROM ops_tasks "
+        "WHERE assignee = 'm-charlie' AND item_type = 'chore' AND status = 'done' AND completed_at >= date('now')",
+    )
+    stars_week_row = await db.execute_fetchone(
+        "SELECT COALESCE(SUM(points), 0) as s FROM ops_tasks "
+        "WHERE assignee = 'm-charlie' AND item_type = 'chore' AND status = 'done' AND completed_at >= date('now', '-7 days')",
+    )
+    return {
+        "ok": True,
+        "done": updated["status"] == "done",
+        "stars_today": stars_today_row["s"] if stars_today_row else 0,
+        "stars_week": stars_week_row["s"] if stars_week_row else 0,
+    }
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1051,8 +1212,9 @@ async def get_autonomy_tiers():
 @app.get("/api/costs")
 async def get_costs():
     db = await get_db()
-    monthly_spend = await get_config(db, "api_cost_this_month") or "0"
-    monthly_budget = await get_config(db, "monthly_api_budget") or "30"
+    month_key = f"api_spend_{date.today().strftime('%Y_%m')}"
+    monthly_spend = await get_config(db, month_key) or "0"
+    monthly_budget = await get_config(db, "monthly_api_budget_alert") or "75"
     return {
         "this_month": float(monthly_spend),
         "budget": float(monthly_budget),
@@ -1242,6 +1404,20 @@ async def voice_profiles(member: str = "m-james"):
     profiles = await voice_module.get_profiles(db, member)
     stats = await voice_module.get_corpus_stats(db, member)
     return {"profiles": profiles, "stats": stats}
+
+
+# ═══════════════════════════════════════════════════════════════
+# SPA CATCH-ALL (must be last route)
+# ═══════════════════════════════════════════════════════════════
+
+@app.get("/{full_path:path}", response_class=HTMLResponse)
+async def spa_fallback(full_path: str):
+    """Serve index.html for any unmatched route (React SPA client-side routing)."""
+    index_path = os.path.join(os.path.dirname(__file__), "..", "..", "static", "index.html")
+    if os.path.exists(index_path):
+        with open(index_path) as f:
+            return HTMLResponse(content=f.read())
+    raise HTTPException(status_code=404, detail="Frontend not built. Run: cd frontend && npm run build")
 
 
 # ═══════════════════════════════════════════════════════════════

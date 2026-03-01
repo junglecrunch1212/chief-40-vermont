@@ -9,6 +9,7 @@ async def setup_scheduler(app, db):
     """Configure and start the APScheduler with all cron jobs.
 
     CRITICAL: Use AsyncIOScheduler, NEVER BlockingScheduler (freezes event loop).
+    All jobs are async functions — APScheduler's AsyncIOScheduler handles them natively.
     """
     try:
         from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -21,106 +22,88 @@ async def setup_scheduler(app, db):
 
     # ─── Calendar Sync ───
     scheduler.add_job(
-        lambda: _run_job(db, _calendar_incremental_sync),
-        CronTrigger.from_crontab("*/15 * * * *"),
-        id="calendar_incremental_sync",
+        _safe_job, CronTrigger.from_crontab("*/15 * * * *"),
+        args=[_calendar_incremental_sync, db], id="calendar_incremental_sync",
     )
     scheduler.add_job(
-        lambda: _run_job(db, _calendar_full_sync),
-        CronTrigger.from_crontab("0 2 * * *"),
-        id="calendar_full_sync",
+        _safe_job, CronTrigger.from_crontab("0 2 * * *"),
+        args=[_calendar_full_sync, db], id="calendar_full_sync",
     )
     scheduler.add_job(
-        lambda: _run_job(db, _compute_daily_states),
-        CronTrigger.from_crontab("30 5 * * *"),
-        id="compute_daily_states",
+        _safe_job, CronTrigger.from_crontab("30 5 * * *"),
+        args=[_compute_daily_states, db], id="compute_daily_states",
     )
 
     # ─── Tasks ───
     scheduler.add_job(
-        lambda: _run_job(db, _recurring_spawn),
-        CronTrigger.from_crontab("0 6 * * *"),
-        id="recurring_spawn",
+        _safe_job, CronTrigger.from_crontab("0 6 * * *"),
+        args=[_recurring_spawn, db], id="recurring_spawn",
     )
     scheduler.add_job(
-        lambda: _run_job(db, _escalation_check),
-        CronTrigger.from_crontab("0 17 * * *"),
-        id="escalation_check",
+        _safe_job, CronTrigger.from_crontab("0 17 * * *"),
+        args=[_escalation_check, db], id="escalation_check",
     )
 
     # ─── Proactive ───
     scheduler.add_job(
-        lambda: _run_job(db, _morning_digest),
-        CronTrigger.from_crontab("15 7 * * *"),
-        id="morning_digest",
+        _safe_job, CronTrigger.from_crontab("15 7 * * *"),
+        args=[_morning_digest, db], id="morning_digest",
     )
     scheduler.add_job(
-        lambda: _run_job(db, _proactive_trigger_scan),
-        CronTrigger.from_crontab("*/30 7-22 * * *"),
-        id="proactive_trigger_scan",
+        _safe_job, CronTrigger.from_crontab("*/30 7-22 * * *"),
+        args=[_proactive_trigger_scan, db], id="proactive_trigger_scan",
     )
 
     # ─── Memory ───
     scheduler.add_job(
-        lambda: _run_job(db, _auto_promote_session_facts),
-        CronTrigger.from_crontab("0 */6 * * *"),
-        id="auto_promote_session_facts",
+        _safe_job, CronTrigger.from_crontab("0 */6 * * *"),
+        args=[_auto_promote_session_facts, db], id="auto_promote_session_facts",
     )
 
     # ─── Sheets ───
     scheduler.add_job(
-        lambda: _run_job(db, _push_to_sheets),
-        CronTrigger.from_crontab("*/15 * * * *"),
-        id="push_to_sheets",
+        _safe_job, CronTrigger.from_crontab("*/15 * * * *"),
+        args=[_push_to_sheets, db], id="push_to_sheets",
     )
 
     # ─── System ───
     scheduler.add_job(
-        lambda: _run_job(db, _health_probe),
-        CronTrigger.from_crontab("*/30 * * * *"),
-        id="health_probe",
+        _safe_job, CronTrigger.from_crontab("*/30 * * * *"),
+        args=[_health_probe, db], id="health_probe",
     )
     scheduler.add_job(
-        lambda: _run_job(db, _sqlite_backup),
-        CronTrigger.from_crontab("0 * * * *"),
-        id="sqlite_backup",
+        _safe_job, CronTrigger.from_crontab("0 * * * *"),
+        args=[_sqlite_backup, db], id="sqlite_backup",
     )
     scheduler.add_job(
-        lambda: _run_job(db, _cleanup_expired),
-        CronTrigger.from_crontab("0 3 * * *"),
-        id="cleanup_expired",
+        _safe_job, CronTrigger.from_crontab("0 3 * * *"),
+        args=[_cleanup_expired, db], id="cleanup_expired",
     )
     scheduler.add_job(
-        lambda: _run_job(db, _fts5_rebuild),
-        CronTrigger.from_crontab("0 2 * * 0"),
-        id="fts5_rebuild",
+        _safe_job, CronTrigger.from_crontab("0 2 * * 0"),
+        args=[_fts5_rebuild, db], id="fts5_rebuild",
     )
 
     # ─── Comms Domain ───
     scheduler.add_job(
-        lambda: _run_job(db, _extraction_worker),
-        CronTrigger.from_crontab("*/5 * * * *"),
-        id="extraction_worker",
+        _safe_job, CronTrigger.from_crontab("*/5 * * * *"),
+        args=[_extraction_worker, db], id="extraction_worker",
     )
     scheduler.add_job(
-        lambda: _run_job(db, _unsnooze_comms),
-        CronTrigger.from_crontab("*/15 * * * *"),
-        id="unsnooze_comms",
+        _safe_job, CronTrigger.from_crontab("*/15 * * * *"),
+        args=[_unsnooze_comms, db], id="unsnooze_comms",
     )
     scheduler.add_job(
-        lambda: _run_job(db, _retry_failed_extractions),
-        CronTrigger.from_crontab("0 */4 * * *"),
-        id="retry_failed_extractions",
+        _safe_job, CronTrigger.from_crontab("0 */4 * * *"),
+        args=[_retry_failed_extractions, db], id="retry_failed_extractions",
     )
     scheduler.add_job(
-        lambda: _run_job(db, _expire_stale_drafts),
-        CronTrigger.from_crontab("0 22 * * *"),
-        id="expire_stale_drafts",
+        _safe_job, CronTrigger.from_crontab("0 22 * * *"),
+        args=[_expire_stale_drafts, db], id="expire_stale_drafts",
     )
     scheduler.add_job(
-        lambda: _run_job(db, _synthesize_voice_profiles),
-        CronTrigger.from_crontab("0 3 * * 0"),
-        id="synthesize_voice_profiles",
+        _safe_job, CronTrigger.from_crontab("0 3 * * 0"),
+        args=[_synthesize_voice_profiles, db], id="synthesize_voice_profiles",
     )
 
     scheduler.start()
@@ -128,14 +111,12 @@ async def setup_scheduler(app, db):
     return scheduler
 
 
-def _run_job(db, fn):
-    """Wrapper to run async job functions safely."""
-    import asyncio
+async def _safe_job(fn, db):
+    """Async wrapper for error isolation — prevents one failing job from crashing the scheduler."""
     try:
-        loop = asyncio.get_event_loop()
-        loop.create_task(fn(db))
+        await fn(db)
     except Exception as e:
-        log.error(f"Scheduler job failed: {e}", exc_info=True)
+        log.error(f"Scheduler job {fn.__name__} failed: {e}", exc_info=True)
 
 
 # ─── Job Implementations ───
@@ -144,9 +125,12 @@ async def _morning_digest(db):
     """Build and log morning digest (7:15 AM ET). Delivery via adapters when wired."""
     from pib.proactive import build_morning_digest_data
     log.info("Running morning digest")
-    data = await build_morning_digest_data(db)
-    log.info(f"Morning digest assembled: {len(data)} sections")
-    # TODO: pipe through LLM to compose natural language, then send via outbound adapter
+    members = await db.execute_fetchall(
+        "SELECT id FROM common_members WHERE active = 1 AND role = 'parent'"
+    )
+    for member in members or []:
+        data = await build_morning_digest_data(db, member["id"])
+        log.info(f"Morning digest for {member['id']}: {len(data)} sections")
 
 
 async def _proactive_trigger_scan(db):
@@ -159,12 +143,21 @@ async def _proactive_trigger_scan(db):
     )
     for member in members or []:
         member_id = member["id"]
-        if not await can_send_proactive(db, member_id):
+        ok, reason = await can_send_proactive(db, member_id)
+        if not ok:
+            log.debug(f"Proactive blocked for {member_id}: {reason}")
             continue
         fired = await scan_triggers(db, member_id)
         for trigger in fired:
-            log.info(f"Trigger fired: {trigger['name']} for {member_id}")
-            # TODO: compose message via LLM and send via outbound adapter
+            log.info(f"Trigger fired: {trigger['trigger']} for {member_id}")
+            # Record the trigger firing for cooldown tracking
+            await db.execute(
+                "INSERT INTO mem_cos_activity (action_type, actor, description, created_at) "
+                "VALUES ('proactive_message', 'proactive', ?, datetime('now'))",
+                [f"trigger:{trigger['trigger']} for {member_id}"],
+            )
+        if fired:
+            await db.commit()
 
 
 async def _recurring_spawn(db):
@@ -230,7 +223,13 @@ async def _escalation_check(db):
     )
     if overdue:
         log.info(f"Found {len(overdue)} overdue tasks for escalation")
-        # TODO: send escalation notifications via outbound adapter
+        for task in overdue:
+            await db.execute(
+                "INSERT INTO mem_cos_activity (action_type, actor, description, created_at) "
+                "VALUES ('escalation', 'scheduler', ?, datetime('now'))",
+                [f"Overdue: {task['title']} (due {task['due_date']}) assigned to {task['assignee']}"],
+            )
+        await db.commit()
 
 
 async def _auto_promote_session_facts(db):
@@ -252,13 +251,11 @@ async def _push_to_sheets(db):
 async def _calendar_incremental_sync(db):
     """Incremental calendar sync every 15 minutes."""
     log.info("Calendar incremental sync — awaiting Google Calendar adapter")
-    # TODO: implement when Google Calendar OAuth adapter is wired
 
 
 async def _calendar_full_sync(db):
     """Full calendar resync at 2 AM."""
     log.info("Calendar full sync — awaiting Google Calendar adapter")
-    # TODO: implement when Google Calendar OAuth adapter is wired
 
 
 async def _compute_daily_states(db):

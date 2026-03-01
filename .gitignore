@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# SQLite
+*.db
+*.db-shm
+*.db-wal
+
+# Secrets
+.env
+config/.env
+*.pem
+*.key
+google-sa-key.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node (for frontend tooling)
+node_modules/
+
+# Backups
+backups/
+*.bak
+
+# Logs
+logs/
+*.log
+*.jsonl
+
+# Coverage
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Temporary
+/tmp/
+*.tmp

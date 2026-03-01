@@ -178,13 +178,36 @@ async def auto_promote_session_facts(db) -> dict:
 
 # ─── FTS5 Search ───
 
+def _sanitize_fts5_query(query: str) -> str:
+    """Sanitize a query string for FTS5 MATCH. Remove special characters."""
+    import re
+    # Remove FTS5 special characters and keep only words
+    words = re.findall(r'\w+', query)
+    if not words:
+        return ""
+    # Join with spaces — FTS5 implicit AND
+    return " ".join(words)
+
+
 async def search_memory(db, query: str, limit: int = 10) -> list[dict]:
     """Search long-term memory via FTS5."""
-    rows = await db.execute_fetchall(
-        "SELECT lt.*, rank FROM mem_long_term_fts fts "
-        "JOIN mem_long_term lt ON lt.id = fts.rowid "
-        "WHERE mem_long_term_fts MATCH ? AND lt.superseded_by IS NULL "
-        "ORDER BY rank LIMIT ?",
-        [query, limit],
-    )
-    return [dict(r) for r in rows] if rows else []
+    safe_query = _sanitize_fts5_query(query)
+    if not safe_query:
+        return []
+    try:
+        rows = await db.execute_fetchall(
+            "SELECT lt.*, rank FROM mem_long_term_fts fts "
+            "JOIN mem_long_term lt ON lt.id = fts.rowid "
+            "WHERE mem_long_term_fts MATCH ? AND lt.superseded_by IS NULL "
+            "ORDER BY rank LIMIT ?",
+            [safe_query, limit],
+        )
+        return [dict(r) for r in rows] if rows else []
+    except Exception:
+        # FTS5 content sync may not be set up — fall back to LIKE search
+        rows = await db.execute_fetchall(
+            "SELECT * FROM mem_long_term WHERE content LIKE ? AND superseded_by IS NULL "
+            "ORDER BY created_at DESC LIMIT ?",
+            [f"%{safe_query}%", limit],
+        )
+        return [dict(r) for r in rows] if rows else []

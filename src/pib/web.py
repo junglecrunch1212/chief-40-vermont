@@ -18,6 +18,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from pib.auth import auth_middleware, validate_bluebubbles_secret, validate_siri_token, validate_twilio_signature
+from pib.bootstrap_wizard import upsert_env_value, wizard_state
 from pib.db import apply_migrations, apply_schema, get_config, get_connection, next_id, set_config
 from pib.engine import (
     DBSnapshot,
@@ -27,6 +28,7 @@ from pib.engine import (
     transition_task,
     what_now,
 )
+from pib.readiness import evaluate_readiness, validate_strict_startup
 from pib.rewards import complete_task_with_reward, select_reward
 
 log = logging.getLogger(__name__)
@@ -61,6 +63,7 @@ def setup_logging():
 
 
 _app_start_time = time.time()
+_readiness_cache: dict | None = None
 
 # ─── Database singleton ───
 _db: aiosqlite.Connection | None = None
@@ -79,8 +82,11 @@ async def get_db() -> aiosqlite.Connection:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global _readiness_cache
     setup_logging()
     db = await get_db()
+    _readiness_cache = await evaluate_readiness(db)
+    validate_strict_startup(_readiness_cache)
     log.info("PIB v5 starting — database connected")
 
     from pib.scheduler import setup_scheduler
@@ -151,6 +157,16 @@ async def health_probe():
             "dbSize": f"{db_size_mb} MB",
         },
     )
+
+
+@app.get("/api/readiness")
+async def readiness_probe():
+    """Readiness endpoint for bootstrap and operations checks."""
+    global _readiness_cache
+    db = await get_db()
+    report = await evaluate_readiness(db)
+    _readiness_cache = report
+    return JSONResponse(status_code=200 if report.get("ready") else 503, content=report)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1409,6 +1425,129 @@ async def voice_profiles(member: str = "m-james"):
 # ═══════════════════════════════════════════════════════════════
 # SPA CATCH-ALL (must be last route)
 # ═══════════════════════════════════════════════════════════════
+
+
+
+@app.get("/api/bootstrap/wizard")
+async def bootstrap_wizard_state():
+    return wizard_state()
+
+
+@app.post("/api/bootstrap/wizard/env")
+async def bootstrap_wizard_save(request: Request):
+    body = await request.json()
+    key = (body.get("key") or "").strip()
+    value = body.get("value")
+    if not key or value is None:
+        raise HTTPException(status_code=400, detail="'key' and 'value' are required")
+    upsert_env_value(key, str(value))
+    return {"ok": True, "saved": key, "state": wizard_state()}
+
+
+@app.post("/api/bootstrap/wizard/bulk")
+async def bootstrap_wizard_save_bulk(request: Request):
+    body = await request.json()
+    values = body.get("values", {})
+    if not isinstance(values, dict):
+        raise HTTPException(status_code=400, detail="'values' must be an object")
+    saved = []
+    for key, value in values.items():
+        if key and value is not None:
+            upsert_env_value(str(key).strip(), str(value))
+            saved.append(key)
+    return {"ok": True, "saved": saved, "state": wizard_state()}
+
+
+@app.get("/bootstrap/setup", response_class=HTMLResponse)
+async def bootstrap_setup_console():
+    """Simple non-coder setup console for entering OAuth/API credentials."""
+    html = """
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PIB Bootstrap Setup Wizard</title>
+  <style>
+    body { font-family: -apple-system, Segoe UI, sans-serif; margin: 0; background:#f7f5f2; color:#2d2926; }
+    .wrap { max-width: 1100px; margin: 20px auto; padding: 0 16px; }
+    .card { background:#fff; border:1px solid #e6dfd5; border-radius:12px; padding:16px; margin-bottom:12px; }
+    .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    input { flex:1; min-width:320px; padding:10px; border:1px solid #d8cfc4; border-radius:8px; }
+    button { padding:10px 14px; border:none; border-radius:8px; background:#e8a0bf; color:#fff; cursor:pointer; }
+    .muted { color:#6b5e54; font-size:13px; }
+    .ok { color:#2e9f68; font-weight:600; }
+    .warn { color:#b26e2f; font-weight:600; }
+    ol { margin: 8px 0 0 20px; }
+    h1, h2, h3 { margin: 0 0 10px 0; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>PIB Bootstrap Setup Wizard</h1>
+      <div id="status" class="muted">Loading…</div>
+      <div class="muted">Use this page in Chrome while you open each provider console in another tab, approve permissions, and paste credentials below.</div>
+      <div class="muted" style="margin-top:6px">Tip: keep this page and provider tabs side-by-side.</div>
+    </div>
+    <div id="fields"></div>
+  </div>
+<script>
+async function fetchState(){
+  const r = await fetch('/api/bootstrap/wizard');
+  return r.json();
+}
+async function saveKey(key, value){
+  const r = await fetch('/api/bootstrap/wizard/env', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({key, value})});
+  if(!r.ok){ const e = await r.text(); throw new Error(e); }
+  return r.json();
+}
+function render(state){
+  const status = document.getElementById('status');
+  status.innerHTML = state.complete
+    ? `<span class="ok">✅ Required credentials complete.</span> Env file: ${state.env_file}`
+    : `<span class="warn">⚠️ Missing required: ${state.missing_required.join(', ')}</span> · Env file: ${state.env_file}`;
+
+  const fields = document.getElementById('fields');
+  fields.innerHTML = '';
+  for (const f of state.fields){
+    const card = document.createElement('div');
+    card.className='card';
+    card.innerHTML = `
+      <div class="row" style="justify-content:space-between">
+        <h3>${f.service} — ${f.label}</h3>
+        <div class="muted">${f.required ? 'Required' : 'Optional'} · ${f.is_set ? 'Saved: '+(f.value_masked||'(set)') : 'Not set'}</div>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <input type="${f.secret ? 'password':'text'}" placeholder="${f.key}" id="in_${f.key}" />
+        <button id="btn_${f.key}">Save</button>
+      </div>
+      <div class="muted" style="margin-top:8px"><strong>Chrome workflow:</strong></div>
+      <ol>${f.chrome_steps.map(s=>`<li>${s}</li>`).join('')}</ol>
+    `;
+    fields.appendChild(card);
+    setTimeout(()=>{
+      const btn = document.getElementById(`btn_${f.key}`);
+      const input = document.getElementById(`in_${f.key}`);
+      btn.onclick = async () => {
+        try {
+          await saveKey(f.key, input.value || '');
+          const next = await fetchState();
+          render(next);
+        } catch (e){
+          alert('Save failed: '+e.message);
+        }
+      };
+    },0);
+  }
+}
+(async()=>{ render(await fetchState()); })();
+</script>
+</body>
+</html>
+"""
+    return HTMLResponse(content=html)
+
 
 @app.get("/{full_path:path}", response_class=HTMLResponse)
 async def spa_fallback(full_path: str):

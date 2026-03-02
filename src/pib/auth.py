@@ -12,6 +12,11 @@ from fastapi import HTTPException, Request
 
 log = logging.getLogger(__name__)
 
+
+def _is_production() -> bool:
+    return os.environ.get("PIB_ENV", "dev").lower() in {"prod", "production"}
+
+
 # ─── Rate Limiter ───
 
 class RateLimiter:
@@ -52,6 +57,9 @@ def validate_twilio_signature(request_url: str, params: dict, signature: str) ->
     """Validate Twilio webhook signature using HMAC-SHA1."""
     auth_token = os.environ.get("TWILIO_AUTH_TOKEN", "")
     if not auth_token:
+        if _is_production():
+            log.error("TWILIO_AUTH_TOKEN not set in production")
+            return False
         log.warning("TWILIO_AUTH_TOKEN not set — skipping signature validation")
         return True
 
@@ -77,6 +85,9 @@ def validate_bluebubbles_secret(request_secret: str) -> bool:
     """Validate BlueBubbles webhook shared secret."""
     expected = os.environ.get("BLUEBUBBLES_SECRET", "")
     if not expected:
+        if _is_production():
+            log.error("BLUEBUBBLES_SECRET not set in production")
+            return False
         log.warning("BLUEBUBBLES_SECRET not set — skipping validation")
         return True
     return hmac.compare_digest(request_secret, expected)
@@ -88,7 +99,7 @@ def validate_siri_token(auth_header: str) -> bool:
     """Validate Siri Shortcuts Bearer token."""
     expected = os.environ.get("SIRI_BEARER_TOKEN", "")
     if not expected:
-        return True
+        return not _is_production()
     if not auth_header.startswith("Bearer "):
         return False
     return hmac.compare_digest(auth_header[7:], expected)

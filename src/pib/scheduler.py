@@ -84,6 +84,12 @@ async def setup_scheduler(app, db):
         args=[_fts5_rebuild, db], id="fts5_rebuild",
     )
 
+    # ─── Sensor Bus ───
+    scheduler.add_job(
+        _safe_job, CronTrigger.from_crontab("*/5 * * * *"),
+        args=[_sensor_bus_poll, db], id="sensor_bus_poll",
+    )
+
     # ─── Comms Domain ───
     scheduler.add_job(
         _safe_job, CronTrigger.from_crontab("*/5 * * * *"),
@@ -104,6 +110,20 @@ async def setup_scheduler(app, db):
     scheduler.add_job(
         _safe_job, CronTrigger.from_crontab("0 3 * * 0"),
         args=[_synthesize_voice_profiles, db], id="synthesize_voice_profiles",
+    )
+
+    # ─── Capture Domain ───
+    scheduler.add_job(
+        _safe_job, CronTrigger.from_crontab("*/30 7-23 * * *"),
+        args=[_capture_deep_organizer, db], id="capture_deep_organizer",
+    )
+    scheduler.add_job(
+        _safe_job, CronTrigger.from_crontab("0 3 * * *"),
+        args=[_capture_stale_cleanup, db], id="capture_stale_cleanup",
+    )
+    scheduler.add_job(
+        _safe_job, CronTrigger.from_crontab("0 2 * * 0"),
+        args=[_capture_fts5_rebuild, db], id="capture_fts5_rebuild",
     )
 
     scheduler.start()
@@ -259,29 +279,172 @@ async def _calendar_full_sync(db):
 
 
 async def _compute_daily_states(db):
-    """Compute daily calendar states at 5:30 AM."""
+    """Compute daily calendar states at 5:30 AM.
+
+    Merges four data streams:
+      1. Calendar events (from cal_classified_events)
+      2. Custody computation
+      3. Sensor readings (via enrichment layer)
+      4. Task/budget context
+    """
     from datetime import date
     from pib.custody import who_has_child
+    from pib.engine import compute_complexity_score
     import json
 
     log.info("Computing daily states")
     today = date.today()
+    today_str = today.isoformat()
+
+    # ── 1. Custody ──
+    custody_states = {}
     config_row = await db.execute_fetchone(
         "SELECT * FROM common_custody_configs WHERE active = 1 LIMIT 1"
     )
     if config_row:
         parent = who_has_child(today, dict(config_row))
-        custody_json = json.dumps({"charlie": parent})
-        member_states_json = json.dumps({})
-        await db.execute(
-            "INSERT INTO cal_daily_states (state_date, version, custody_states, member_states, complexity_score, computed_at) "
-            "VALUES (?, 1, ?, ?, 0.0, datetime('now')) "
-            "ON CONFLICT(state_date, version) DO UPDATE SET "
-            "custody_states = excluded.custody_states, computed_at = excluded.computed_at",
-            [today.isoformat(), custody_json, member_states_json],
-        )
-        await db.commit()
-        log.info(f"Daily state computed: custody={parent}")
+        custody_states = {"charlie": parent}
+
+    # ── 2. Calendar events for today ──
+    events = await db.execute_fetchall(
+        "SELECT * FROM cal_classified_events WHERE event_date = ? ORDER BY start_time",
+        [today_str],
+    )
+    events = [dict(e) for e in events] if events else []
+
+    # ── 3. Member states (initialize) ──
+    members = await db.execute_fetchall(
+        "SELECT id FROM common_members WHERE active = 1"
+    )
+    member_states = {}
+    for m in members or []:
+        member_states[m["id"]] = {
+            "events": [e for e in events if m["id"] in (e.get("for_member_ids") or "")],
+        }
+
+    # ── 4. Overdue tasks ──
+    overdue_row = await db.execute_fetchone(
+        "SELECT COUNT(*) as c FROM ops_tasks WHERE due_date < ? AND status NOT IN ('done','dismissed','deferred')",
+        [today_str],
+    )
+    overdue_count = overdue_row["c"] if overdue_row else 0
+
+    # ── 5. Conflicts ──
+    conflict_row = await db.execute_fetchone(
+        "SELECT COUNT(*) as c FROM cal_conflicts WHERE status = 'unresolved' AND conflict_date = ?",
+        [today_str],
+    )
+    conflict_count = conflict_row["c"] if conflict_row else 0
+
+    # ── 6. Build state dict ──
+    state = {
+        "custody_states": custody_states,
+        "member_states": member_states,
+        "events": events,
+        "overdue_tasks": overdue_count,
+        "unresolved_conflicts": conflict_count,
+        "transportation": {},
+        "coverage_status": {},
+        "activity_schedule": {},
+        "complexity_score": 0.0,
+        "task_load": {},
+        "budget_snapshot": {},
+    }
+
+    # ── 7. Life phase ──
+    phase_row = await db.execute_fetchone(
+        "SELECT name FROM common_life_phases WHERE status = 'active' LIMIT 1"
+    )
+    state["life_phase"] = phase_row["name"] if phase_row else None
+
+    # ── 8. Sensor enrichment (graceful — no-op if no sensors active) ──
+    try:
+        from pib.sensors.enrichment import enrich_daily_state_with_sensors
+        await enrich_daily_state_with_sensors(db, state)
+    except Exception as e:
+        log.warning(f"Sensor enrichment failed (non-fatal): {e}")
+
+    # ── 8b. Capture enrichment (graceful — no-op if no cap tables) ──
+    try:
+        from pib.capture import get_capture_stats
+        for m in members or []:
+            stats = await get_capture_stats(db, m["id"])
+            if m["id"] in member_states:
+                member_states[m["id"]]["capture_stats"] = stats
+    except Exception:
+        pass  # Capture tables may not exist yet
+
+    # ── 9. Complexity score ──
+    state["complexity_score"] = compute_complexity_score(state)
+
+    # ── 10. Store ──
+    custody_json = json.dumps(state["custody_states"])
+    member_states_json = json.dumps(state["member_states"])
+    transportation_json = json.dumps(state.get("transportation", {}))
+    coverage_json = json.dumps(state.get("coverage_status", {}))
+    activity_json = json.dumps(state.get("activity_schedule", {}))
+    task_load_json = json.dumps(state.get("task_load", {}))
+    budget_json = json.dumps(state.get("budget_snapshot", {}))
+
+    await db.execute(
+        """INSERT INTO cal_daily_states
+           (state_date, version, custody_states, member_states,
+            transportation, coverage_status, activity_schedule,
+            complexity_score, task_load, budget_snapshot, life_phase, computed_at)
+           VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+           ON CONFLICT(state_date, version) DO UPDATE SET
+             custody_states = excluded.custody_states,
+             member_states = excluded.member_states,
+             transportation = excluded.transportation,
+             coverage_status = excluded.coverage_status,
+             activity_schedule = excluded.activity_schedule,
+             complexity_score = excluded.complexity_score,
+             task_load = excluded.task_load,
+             budget_snapshot = excluded.budget_snapshot,
+             life_phase = excluded.life_phase,
+             computed_at = excluded.computed_at""",
+        [
+            today_str, custody_json, member_states_json,
+            transportation_json, coverage_json, activity_json,
+            state["complexity_score"], task_load_json, budget_json,
+            state.get("life_phase"),
+        ],
+    )
+    await db.commit()
+    log.info(
+        f"Daily state computed: custody={custody_states}, "
+        f"complexity={state['complexity_score']:.1f}, "
+        f"sensors={'enriched' if 'weather' in state else 'none'}"
+    )
+
+
+async def _sensor_bus_poll(db):
+    """Poll all enabled sensors that are due for a reading."""
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    rows = await db.execute_fetchall(
+        """SELECT sensor_id FROM pib_sensor_config
+           WHERE enabled = 1 AND status IN ('healthy', 'degraded')
+             AND poll_interval_minutes > 0
+             AND (next_poll_at IS NULL OR next_poll_at <= ?)""",
+        [now],
+    )
+    if not rows:
+        return
+
+    # Lazy import to avoid circular dependency
+    from pib.sensors.bus import SensorBus
+
+    # Get or create the bus instance from app state if available,
+    # otherwise create a temporary one for this poll cycle.
+    bus = getattr(db, "_sensor_bus", None)
+    if bus is None:
+        bus = SensorBus(db)
+        await bus.start()
+
+    for row in rows:
+        await bus.poll_sensor(row["sensor_id"])
 
 
 async def _health_probe(db):
@@ -367,3 +530,42 @@ async def _synthesize_voice_profiles(db):
         total += count
     if total > 0:
         log.info(f"Synthesized {total} voice profiles")
+
+
+# ─── Capture Domain Jobs ───
+
+
+async def _capture_deep_organizer(db):
+    """Run deep organizer on triaged captures every 30 min (7 AM - 11 PM)."""
+    try:
+        from pib.capture_organizer import organize_batch
+        count = await organize_batch(db)
+        if count > 0:
+            log.info(f"Deep organizer processed {count} captures")
+    except Exception as e:
+        log.debug(f"Capture deep organizer skipped: {e}")
+
+
+async def _capture_stale_cleanup(db):
+    """Auto-archive inbox captures > 30 days (3 AM daily)."""
+    try:
+        cursor = await db.execute(
+            "UPDATE cap_captures SET archived = 1, archived_at = strftime('%Y-%m-%dT%H:%M:%SZ','now') "
+            "WHERE notebook = 'inbox' AND archived = 0 "
+            "AND created_at < datetime('now', '-30 days')"
+        )
+        await db.commit()
+        if cursor.rowcount > 0:
+            log.info(f"Auto-archived {cursor.rowcount} stale inbox captures")
+    except Exception as e:
+        log.debug(f"Capture stale cleanup skipped: {e}")
+
+
+async def _capture_fts5_rebuild(db):
+    """Weekly rebuild of capture FTS5 index (Sunday 2 AM)."""
+    try:
+        await db.execute("INSERT INTO cap_captures_fts(cap_captures_fts) VALUES('rebuild')")
+        await db.commit()
+        log.info("Capture FTS5 index rebuilt")
+    except Exception as e:
+        log.debug(f"Capture FTS5 rebuild skipped: {e}")

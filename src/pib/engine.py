@@ -168,6 +168,78 @@ def compute_energy_level(energy_state: dict | None, member: dict, now: datetime 
     return "medium"
 
 
+# ─── Complexity Score ───
+
+
+def compute_complexity_score(state: dict) -> float:
+    """Compute daily complexity score from calendar + environmental signals.
+
+    Base scoring (calendar):
+      +1.0 per HARD_BLOCK event
+      +0.5 per SOFT_BLOCK
+      +1.5 per coverage gap
+      +2.0 per unresolved conflict
+      +0.3 per REQUIRES_TRANSPORT
+      +0.5 per custody transition
+      +0.2 per overdue task
+
+    Environmental modifiers (sensor-driven):
+      +0.5 if severe weather alert active
+      +0.3 if school status != "normal"
+      +0.2 if any delivery requires someone home during a block
+      +0.3 if any member sleep_quality == "poor"
+      +0.2 if traffic delay > 15 min
+      -0.3 if weather is "perfect" (good outdoor suitability, no alerts)
+
+    Cap at 10.0.
+    """
+    score = 0.0
+
+    # ── Calendar base scoring ──
+    events = state.get("events", [])
+    for event in events:
+        impact = event.get("scheduling_impact")
+        if impact == "HARD_BLOCK":
+            score += 1.0
+        elif impact == "SOFT_BLOCK":
+            score += 0.5
+        elif impact == "REQUIRES_TRANSPORT":
+            score += 0.3
+
+    score += state.get("unresolved_conflicts", 0) * 2.0
+    score += state.get("overdue_tasks", 0) * 0.2
+
+    # Custody transitions (if custody_states mentions a transition today)
+    custody = state.get("custody_states", {})
+    if custody.get("transition_today"):
+        score += 0.5
+
+    # ── Environmental modifiers (from sensor enrichment) ──
+    weather = state.get("weather", {})
+    if weather:
+        alerts = weather.get("alerts", [])
+        if alerts:
+            score += 0.5
+        elif weather.get("outdoor_suitability") == "good" and not alerts:
+            score -= 0.3  # Perfect weather reduces complexity
+
+    school = state.get("school_status", {})
+    if school.get("status") and school["status"] != "normal":
+        score += 0.3
+
+    deliveries = state.get("deliveries", {})
+    if deliveries.get("requires_someone_home"):
+        score += 0.2
+
+    member_states = state.get("member_states", {})
+    for mid, mstate in member_states.items():
+        health = mstate.get("health", {})
+        if health.get("sleep_quality") == "poor":
+            score += 0.3
+
+    return min(max(score, 0.0), 10.0)
+
+
 # ─── Energy Filter ───
 
 def _energy_filter(energy_level: str) -> list[str] | None:

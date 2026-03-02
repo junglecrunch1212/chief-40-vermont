@@ -64,6 +64,16 @@ COMMS_TRIGGERS = {
     "whatsapp", "imessage", "wrote", "sent", "received", "heard from",
     "reach out", "voice note", "recording",
 }
+CAPTURE_TRIGGERS = {
+    "capture", "note", "remember this", "save this", "second brain", "notebook",
+    "idea", "recipe", "bookmark", "thought", "jot down", "write down",
+    "my notes", "my ideas", "my captures", "my bookmarks",
+}
+CAPTURE_TRIGGERS = {
+    "capture", "note", "remember this", "save this", "second brain", "notebook",
+    "idea", "recipe", "bookmark", "thought", "jot down", "write down",
+    "my notes", "my ideas", "my captures", "my recipes", "my bookmarks",
+}
 
 
 def build_entity_cache(db_rows: list[dict]) -> dict:
@@ -93,6 +103,8 @@ def analyze_relevance(message: str, entity_cache: dict) -> dict:
         assemblers.update(["coverage", "schedule"])
     if any(t in msg_lower for t in COMMS_TRIGGERS):
         assemblers.add("comms")
+    if any(t in msg_lower for t in CAPTURE_TRIGGERS):
+        assemblers.add("captures")
 
     for entity_id, entity in entity_cache.items():
         if entity["pattern"].search(msg_lower):
@@ -440,6 +452,49 @@ TOOLS = [
             "required": ["summary"],
         },
     },
+    # ─── Capture Domain Tools ───
+    {
+        "name": "capture_thought",
+        "description": "Capture a thought, idea, recipe, bookmark, or note to the Second Brain. Zero friction — just needs text.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "description": "The thought to capture (raw text)"},
+                "household_visible": {"type": "boolean", "description": "Share with household? Default false.", "default": False},
+            },
+            "required": ["text"],
+        },
+    },
+    {
+        "name": "search_captures",
+        "description": "Search the Second Brain (captures, notes, ideas, recipes, bookmarks) via full-text search",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Search query"},
+                "include_household": {"type": "boolean", "default": False},
+                "limit": {"type": "integer", "default": 10},
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "share_capture",
+        "description": "Toggle household visibility for a capture",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "capture_id": {"type": "string"},
+                "household_visible": {"type": "boolean"},
+            },
+            "required": ["capture_id", "household_visible"],
+        },
+    },
+    {
+        "name": "list_notebooks",
+        "description": "List all notebooks for the current user",
+        "input_schema": {"type": "object", "properties": {}},
+    },
 ]
 
 
@@ -488,6 +543,15 @@ async def execute_tool(db, tool_name: str, tool_input: dict, member_id: str) -> 
             return await _tool_approve_draft(db, tool_input, member_id)
         elif tool_name == "capture_comm":
             return await _tool_capture_comm(db, tool_input, member_id)
+        # Capture domain
+        elif tool_name == "capture_thought":
+            return await _tool_capture_thought(db, tool_input, member_id)
+        elif tool_name == "search_captures":
+            return await _tool_search_captures(db, tool_input, member_id)
+        elif tool_name == "share_capture":
+            return await _tool_share_capture(db, tool_input, member_id)
+        elif tool_name == "list_notebooks":
+            return await _tool_list_notebooks(db, member_id)
         else:
             return {"error": f"Unknown tool: {tool_name}"}
     except Exception as e:
@@ -769,6 +833,63 @@ async def _tool_capture_comm(db, inp: dict, member_id: str) -> dict:
     return {"captured": comm_id, "summary": inp["summary"]}
 
 
+# ─── Capture Domain Tool Implementations ───
+
+async def _tool_capture_thought(db, inp: dict, member_id: str) -> dict:
+    from pib.capture import create_capture
+    capture = await create_capture(
+        db, member_id, inp["text"],
+        source="chat",
+        household_visible=inp.get("household_visible", False),
+    )
+    return {
+        "captured": capture["id"],
+        "type": capture["capture_type"],
+        "notebook": capture["notebook"],
+    }
+
+
+async def _tool_search_captures(db, inp: dict, member_id: str) -> dict:
+    from pib.capture import search_captures_fts
+    results = await search_captures_fts(
+        db, inp["query"], member_id,
+        include_household=inp.get("include_household", False),
+        limit=inp.get("limit", 10),
+    )
+    return {
+        "captures": [
+            {"id": r["id"], "type": r["capture_type"], "notebook": r["notebook"],
+             "title": r.get("title"), "raw_text": r["raw_text"][:200],
+             "tags": r.get("tags", "[]")}
+            for r in results
+        ],
+        "count": len(results),
+    }
+
+
+async def _tool_share_capture(db, inp: dict, member_id: str) -> dict:
+    from pib.capture import update_capture
+    result = await update_capture(
+        db, inp["capture_id"], member_id,
+        {"household_visible": 1 if inp["household_visible"] else 0},
+    )
+    if not result:
+        return {"error": "Capture not found or not owned by you"}
+    return {"capture_id": inp["capture_id"], "household_visible": inp["household_visible"]}
+
+
+async def _tool_list_notebooks(db, member_id: str) -> dict:
+    from pib.capture import get_notebook_list
+    notebooks = await get_notebook_list(db, member_id)
+    return {
+        "notebooks": [
+            {"id": nb["id"], "name": nb["name"], "slug": nb["slug"],
+             "icon": nb.get("icon"), "capture_count": nb.get("capture_count", 0)}
+            for nb in notebooks
+        ],
+    }
+
+
 # ─── Conversation History ───
 
 def build_conversation_history(messages: list[dict], channel: str) -> list[dict]:
@@ -801,26 +922,196 @@ SELECT
 
 
 async def build_cross_domain_summary(db) -> str:
-    """Build the always-on 500-token cross-domain summary."""
+    """Build the always-on ~500-token cross-domain summary.
+
+    Enriched with sensor data when available:
+    - Weather summary (temp, condition, alerts)
+    - Sun times (sunrise/sunset)
+    - Per-member health context (privacy-filtered)
+    - Home occupancy
+    - Deliveries
+    - Active sensor alerts
+    """
     row = await db.execute_fetchone(CROSS_DOMAIN_SUMMARY_SQL)
     if not row:
         return "No data available."
 
-    parts = []
-    if row["active_tasks"]:
-        parts.append(f"Active tasks: {row['active_tasks']}")
-    if row["overdue_tasks"]:
-        parts.append(f"Overdue: {row['overdue_tasks']}")
-    if row["due_today"]:
-        parts.append(f"Due today: {row['due_today']}")
-    if row["open_conflicts"]:
-        parts.append(f"Calendar conflicts: {row['open_conflicts']}")
-    if row["budget_alerts"]:
-        parts.append(f"Budget alerts: {row['budget_alerts']}")
-    if row["active_phase"]:
-        parts.append(f"Phase: {row['active_phase']}")
+    lines = []
 
-    return " | ".join(parts) if parts else "All clear."
+    # ── Core stats ──
+    core_parts = []
+    if row["active_tasks"]:
+        task_desc = f"{row['active_tasks']} tasks"
+        if row["overdue_tasks"]:
+            task_desc += f" ({row['overdue_tasks']} overdue)"
+        core_parts.append(task_desc)
+    if row["due_today"]:
+        core_parts.append(f"{row['due_today']} due today")
+    if row["open_conflicts"]:
+        core_parts.append(f"{row['open_conflicts']} conflicts")
+    if row["budget_alerts"]:
+        core_parts.append(f"{row['budget_alerts']} budget alerts")
+    if core_parts:
+        lines.append(" | ".join(core_parts))
+
+    # ── Daily state (includes sensor enrichment) ──
+    daily = await db.execute_fetchone(
+        "SELECT * FROM cal_daily_states WHERE state_date = date('now') ORDER BY version DESC LIMIT 1"
+    )
+    if daily:
+        complexity = daily["complexity_score"]
+        lines.append(f"Complexity: {complexity:.1f}/10")
+
+        # Parse member_states for health context
+        try:
+            member_states = json.loads(daily["member_states"] or "{}")
+            for mid, mstate in member_states.items():
+                health = mstate.get("health", {})
+                if not health:
+                    continue
+                member_parts = [mid.replace("m-", "").title()]
+                # Privacy: only derived impacts, not raw data
+                energy = health.get("energy_level")
+                if energy and energy != "medium":
+                    member_parts.append(f"energy: {energy}")
+                focus = health.get("focus_mode")
+                if focus:
+                    member_parts.append(f"focus: {focus}")
+                if health.get("battery_warning"):
+                    member_parts.append("low battery")
+                sleep_q = health.get("sleep_quality")
+                if sleep_q and sleep_q != "unknown":
+                    member_parts.append(f"sleep: {sleep_q}")
+                if len(member_parts) > 1:
+                    lines.append("  " + " | ".join(member_parts))
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    # ── Sensor context (weather, sun, etc.) ──
+    sensor_lines = await _build_sensor_summary_lines(db)
+    lines.extend(sensor_lines)
+
+    # ── Capture stats ──
+    try:
+        from pib.capture import get_capture_stats
+        # Get stats for all active members
+        members = await db.execute_fetchall("SELECT id FROM common_members WHERE role != 'child'")
+        for m in (members or []):
+            stats = await get_capture_stats(db, m["id"])
+            if stats["total"] > 0:
+                cap_parts = [f"{stats['total']} captures"]
+                if stats["untriaged"]:
+                    cap_parts.append(f"{stats['untriaged']} unorganized")
+                name = m["id"].replace("m-", "").title()
+                lines.append(f"Second Brain ({name}): {', '.join(cap_parts)}")
+    except Exception:
+        pass  # Capture tables may not exist yet
+
+    # ── Phase ──
+    if row["active_phase"]:
+        lines.append(f"Phase: {row['active_phase']}")
+
+    return "\n".join(lines) if lines else "All clear."
+
+
+async def _build_sensor_summary_lines(db) -> list[str]:
+    """Build sensor-enriched summary lines for the cross-domain summary."""
+    lines = []
+
+    try:
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        # Weather
+        weather = await db.execute_fetchone(
+            """SELECT value FROM pib_sensor_readings
+               WHERE sensor_id = 'sensor-weather' AND reading_type = 'weather.current'
+                 AND expires_at > ?
+               ORDER BY timestamp DESC LIMIT 1""",
+            [now],
+        )
+        if weather:
+            try:
+                wv = json.loads(weather["value"])
+                w_parts = []
+                if wv.get("condition_text"):
+                    w_parts.append(wv["condition_text"])
+                if wv.get("temp_f") is not None:
+                    w_parts.append(f"{wv['temp_f']}\u00b0F")
+                if wv.get("uv_index") and wv["uv_index"] >= 6:
+                    w_parts.append(f"UV {wv['uv_index']}")
+                pollen = wv.get("pollen", {})
+                high_pollen = [k for k, v in pollen.items() if v == "high"]
+                if high_pollen:
+                    w_parts.append(f"pollen high")
+                if w_parts:
+                    lines.append("Weather: " + ", ".join(w_parts))
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        # Sun
+        sun = await db.execute_fetchone(
+            """SELECT value FROM pib_sensor_readings
+               WHERE sensor_id = 'sensor-sun' AND reading_type = 'sun.times'
+                 AND expires_at > ?
+               ORDER BY timestamp DESC LIMIT 1""",
+            [now],
+        )
+        if sun:
+            try:
+                sv = json.loads(sun["value"])
+                if sv.get("sunrise") and sv.get("sunset"):
+                    lines.append(f"Sun: rises {sv['sunrise']}, sets {sv['sunset']}")
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        # WiFi presence
+        wifi = await db.execute_fetchone(
+            """SELECT value FROM pib_sensor_readings
+               WHERE sensor_id = 'sensor-wifi-presence' AND reading_type = 'home.wifi_presence'
+                 AND expires_at > ?
+               ORDER BY timestamp DESC LIMIT 1""",
+            [now],
+        )
+        if wifi:
+            try:
+                wfv = json.loads(wifi["value"])
+                home = wfv.get("members_home", [])
+                if home:
+                    names = [m.replace("m-", "").title() for m in home]
+                    lines.append(f"Home: {', '.join(names)}")
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        # Deliveries
+        pkgs = await db.execute_fetchone(
+            """SELECT value FROM pib_sensor_readings
+               WHERE sensor_id = 'sensor-packages' AND reading_type = 'logistics.packages'
+                 AND expires_at > ?
+               ORDER BY timestamp DESC LIMIT 1""",
+            [now],
+        )
+        if pkgs:
+            try:
+                pv = json.loads(pkgs["value"])
+                today_count = len(pv.get("expected_today", []))
+                if today_count > 0:
+                    lines.append(f"Deliveries: {today_count} expected today")
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        # Active sensor alerts
+        alerts = await db.execute_fetchall(
+            "SELECT severity, title FROM pib_sensor_alerts WHERE status = 'active' ORDER BY severity DESC LIMIT 3"
+        )
+        for alert in alerts or []:
+            severity_icon = {"critical": "!!", "warning": "!", "info": ""}.get(alert["severity"], "")
+            lines.append(f"  {severity_icon} {alert['title']}")
+
+    except Exception:
+        pass  # Sensor tables may not exist yet — graceful degradation
+
+    return lines
 
 
 # ─── Privacy-Filtered Calendar Context ───
@@ -896,6 +1187,24 @@ async def assemble_context(db, member_id: str, message: str) -> str:
         if memories:
             mem_lines = [f"  - {m['content']}" for m in memories]
             parts.append(f"RELEVANT MEMORIES:\n" + "\n".join(mem_lines))
+
+    # Capture injection: pinned captures always + FTS-matched captures when relevant
+    try:
+        from pib.capture import list_captures, search_captures_fts
+        # Always inject pinned captures
+        pinned = await list_captures(db, member_id, pinned_only=True, limit=5)
+        if pinned:
+            pin_lines = [f"  - [{c['capture_type']}] {c.get('title') or c['raw_text'][:80]}" for c in pinned]
+            parts.append(f"PINNED CAPTURES:\n" + "\n".join(pin_lines))
+
+        # FTS-matched captures when message is capture-relevant
+        if "captures" in relevance["assemblers"] and search_terms:
+            matched = await search_captures_fts(db, search_terms, member_id, include_household=True, limit=5)
+            if matched:
+                cap_lines = [f"  - [{c['capture_type']}] {c.get('title') or c['raw_text'][:80]}" for c in matched]
+                parts.append(f"RELEVANT CAPTURES:\n" + "\n".join(cap_lines))
+    except Exception:
+        pass  # Capture tables may not exist yet
 
     context = "\n\n".join(parts)
     return enforce_budget("assembled_context", context)

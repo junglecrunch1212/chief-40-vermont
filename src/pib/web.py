@@ -27,7 +27,9 @@ from pib.engine import (
     transition_task,
     what_now,
 )
+from pib.readiness import evaluate_readiness, validate_strict_startup
 from pib.rewards import complete_task_with_reward, select_reward
+from pib.setup_wizard import get_setup_status, upsert_env_values
 
 log = logging.getLogger(__name__)
 
@@ -61,6 +63,7 @@ def setup_logging():
 
 
 _app_start_time = time.time()
+_readiness_cache: dict | None = None
 
 # ─── Database singleton ───
 _db: aiosqlite.Connection | None = None
@@ -79,8 +82,11 @@ async def get_db() -> aiosqlite.Connection:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global _readiness_cache
     setup_logging()
     db = await get_db()
+    _readiness_cache = await evaluate_readiness(db)
+    validate_strict_startup(_readiness_cache)
     log.info("PIB v5 starting — database connected")
 
     from pib.scheduler import setup_scheduler
@@ -151,6 +157,36 @@ async def health_probe():
             "dbSize": f"{db_size_mb} MB",
         },
     )
+
+
+@app.get("/api/readiness")
+async def readiness_probe():
+    """Readiness endpoint for bootstrap and operations checks."""
+    global _readiness_cache
+    db = await get_db()
+    report = await evaluate_readiness(db)
+    _readiness_cache = report
+    return JSONResponse(status_code=200 if report.get("ready") else 503, content=report)
+
+
+@app.get("/api/setup/wizard")
+async def setup_wizard_status():
+    """Credential/setup wizard status for non-technical onboarding."""
+    return get_setup_status()
+
+
+@app.post("/api/setup/env")
+async def setup_wizard_update_env(request: Request):
+    """Upsert allowed environment keys from setup wizard."""
+    body = await request.json()
+    updates = body.get("updates") if isinstance(body, dict) else None
+    if not isinstance(updates, dict) or not updates:
+        raise HTTPException(status_code=400, detail="Body must include non-empty 'updates' object")
+    try:
+        status = upsert_env_values(updates)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True, "status": status}
 
 
 # ═══════════════════════════════════════════════════════════════

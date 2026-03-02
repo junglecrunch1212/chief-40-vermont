@@ -222,6 +222,7 @@ function Shell({ children, page, setPage, actor, setActor }) {
     { id: "scoreboard", icon: Icons.Trophy, label: "Scoreboard" },
     { id: "people", icon: Icons.Users, label: "People" },
     { id: "settings", icon: Icons.Gear, label: "Settings" },
+    { id: "setup", icon: Icons.Gear, label: "Setup Wizard" },
   ];
   const actorData = MEMBERS.find(m => m.id === actor);
   return (
@@ -259,7 +260,7 @@ function Shell({ children, page, setPage, actor, setActor }) {
         {/* Nav Items */}
         <div style={{ flex: 1, padding: "0 10px", overflow: "auto" }}>
           {nav.map(n => {
-            if (actor === "m-charlie" && ["tasks", "people", "settings"].includes(n.id)) return null;
+            if (actor === "m-charlie" && ["tasks", "people", "settings", "setup"].includes(n.id)) return null;
             return (
               <button key={n.id} onClick={() => setPage(n.id)} style={{
                 display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%",
@@ -1663,6 +1664,148 @@ function SettingsPage() {
   );
 }
 
+
+function SetupWizardPage({ standalone = false }) {
+  const { data, loading, stale, refetch } = useAPI("/api/setup/wizard", []);
+  const [form, setForm] = useState({});
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  const status = data || {};
+  const values = status.values || {};
+  const services = status.services || [];
+
+  useEffect(() => {
+    const seed = {};
+    Object.keys(values).forEach(k => { if (!["ANTHROPIC_API_KEY", "TWILIO_AUTH_TOKEN", "GOOGLE_OAUTH_CLIENT_SECRET", "BLUEBUBBLES_SECRET", "CLOUDFLARE_TUNNEL_TOKEN", "SIRI_BEARER_TOKEN", "BACKUP_PUBLIC_KEY", "PIB_SHEETS_WEBHOOK_TOKEN"].includes(k)) seed[k] = values[k]; });
+    setForm(seed);
+  }, [data]);
+
+  const steps = [
+    {
+      id: "google",
+      title: "Google OAuth + APIs (Chrome)",
+      detail: "In Chrome, open Google Cloud Console. Enable Gmail, Calendar, Drive, and Sheets APIs. Create OAuth Client ID (Web app). Add redirect URI from the wizard. Copy client ID/secret into fields below.",
+      link: "https://console.cloud.google.com/apis/dashboard",
+    },
+    {
+      id: "twilio",
+      title: "Twilio SMS",
+      detail: "Open Twilio Console in Chrome, copy Account SID/Auth Token/Phone number. Set webhook URL to https://YOUR_DOMAIN/webhooks/twilio.",
+      link: "https://console.twilio.com/",
+    },
+    {
+      id: "bluebubbles",
+      title: "BlueBubbles iMessage",
+      detail: "In BlueBubbles server settings, configure webhook URL https://YOUR_DOMAIN/webhooks/bluebubbles and shared secret, then save the same secret here.",
+      link: "https://bluebubbles.app/",
+    },
+    {
+      id: "anthropic",
+      title: "Anthropic API Key",
+      detail: "Create a key in Anthropic console and paste into ANTHROPIC_API_KEY.",
+      link: "https://console.anthropic.com/settings/keys",
+    },
+  ];
+
+  const onSave = async () => {
+    setSaving(true);
+    setMsg("");
+    const updates = {};
+    [
+      "PIB_ENV","PIB_STRICT_STARTUP","TWILIO_ACCOUNT_SID","TWILIO_PHONE_NUMBER",
+      "GOOGLE_SA_KEY_PATH","GOOGLE_OAUTH_CLIENT_ID","GOOGLE_OAUTH_REDIRECT_URI","GOOGLE_OAUTH_SCOPES",
+      "BLUEBUBBLES_URL","PIB_CORS_ORIGINS","PIB_TIMEZONE"
+    ].forEach(k => { if (form[k] !== undefined) updates[k] = form[k]; });
+    try {
+      await api.post("/api/setup/env", { updates });
+      setMsg("Saved. Secret fields (keys/tokens) must be entered in terminal or extended secret form.");
+      await refetch();
+    } catch (e) {
+      setMsg(`Save failed: ${e.message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const pageBody = (
+    <div className="fi" style={{ maxWidth: 1100, margin: standalone ? "32px auto" : "0 auto" }}>
+      <h1 style={{ fontSize: 28, fontWeight: 600, fontFamily: "var(--head)", marginBottom: 8 }}>Setup Wizard</h1>
+      <p style={{ color: "var(--tx2)", marginBottom: 18 }}>Guided onboarding for OAuths, credentials, and service connections. Follow each step in Chrome and paste values here.</p>
+      <StaleIndicator stale={stale} />
+
+      {loading ? <LoadingSpinner label="Loading setup wizard" /> : (
+        <>
+          <div className="card-flat" style={{ marginBottom: 14 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <div style={{ fontSize: 13, color: "var(--tx3)" }}>Environment file</div>
+                <div style={{ fontFamily: "var(--mono)", fontSize: 12 }}>{status.env_file || "(not set)"}</div>
+              </div>
+              <span className={`badge ${status.ready ? "badge-grn" : "badge-warn"}`}>{status.ready ? "Ready" : "Needs setup"}</span>
+            </div>
+            {!!status.missing_required?.length && <div style={{ marginTop: 10, fontSize: 13, color: "var(--warn)" }}>Missing required: {status.missing_required.join(", ")}</div>}
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+            <div className="card-flat">
+              <h3 style={{ fontSize: 16, marginBottom: 10 }}>Service Progress</h3>
+              {services.map(svc => (
+                <div key={svc.id} style={{ borderTop: "1px solid var(--bd)", padding: "10px 0" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between" }}>
+                    <strong>{svc.label}</strong>
+                    <span className={`badge ${svc.ready ? "badge-grn" : "badge-warn"}`}>{svc.ready ? "connected" : "incomplete"}</span>
+                  </div>
+                  {!svc.ready && <div style={{ fontSize: 12, color: "var(--tx3)" }}>Missing: {svc.missing.join(", ")}</div>}
+                </div>
+              ))}
+            </div>
+
+            <div className="card-flat">
+              <h3 style={{ fontSize: 16, marginBottom: 10 }}>Chrome Workflow</h3>
+              {steps.map((st, i) => (
+                <div key={st.id} style={{ borderTop: "1px solid var(--bd)", padding: "10px 0" }}>
+                  <div style={{ fontWeight: 600 }}>{i + 1}. {st.title}</div>
+                  <div style={{ fontSize: 13, color: "var(--tx2)", margin: "4px 0 6px" }}>{st.detail}</div>
+                  <a href={st.link} target="_blank" rel="noreferrer" style={{ fontSize: 12 }}>Open in Chrome ↗</a>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="card-flat" style={{ marginTop: 14 }}>
+            <h3 style={{ fontSize: 16, marginBottom: 12 }}>Non-secret config fields</h3>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              {[
+                "PIB_ENV","PIB_STRICT_STARTUP","TWILIO_ACCOUNT_SID","TWILIO_PHONE_NUMBER","GOOGLE_SA_KEY_PATH",
+                "GOOGLE_OAUTH_CLIENT_ID","GOOGLE_OAUTH_REDIRECT_URI","GOOGLE_OAUTH_SCOPES","BLUEBUBBLES_URL","PIB_CORS_ORIGINS","PIB_TIMEZONE"
+              ].map(k => (
+                <label key={k} style={{ fontSize: 12, color: "var(--tx3)" }}>
+                  {k}
+                  <input value={form[k] ?? ""} onChange={(e) => setForm(prev => ({ ...prev, [k]: e.target.value }))} />
+                </label>
+              ))}
+            </div>
+            <div style={{ marginTop: 10, display: "flex", gap: 8, alignItems: "center" }}>
+              <button className="btn-p" onClick={onSave} disabled={saving}>{saving ? "Saving..." : "Save Config"}</button>
+              <button className="btn-s" onClick={refetch}>Refresh Status</button>
+              {msg && <span style={{ fontSize: 12, color: "var(--tx2)" }}>{msg}</span>}
+            </div>
+            <div style={{ marginTop: 10, fontSize: 12, color: "var(--tx3)" }}>
+              Secret fields (API keys/tokens) are masked by design. Use secure secret-entry workflow or set them via terminal if needed.
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+
+  if (standalone) {
+    return <div style={{ minHeight: "100vh", background: "var(--bg)", padding: "0 24px 24px" }}>{pageBody}</div>;
+  }
+  return pageBody;
+}
+
 // ─── STANDALONE SCOREBOARD (TV mode — dark bg, no sidebar, auto-refresh) ───
 function ScoreboardTV() {
   return (
@@ -1709,6 +1852,9 @@ export default function App() {
   if (route === "scoreboard" || route === "/scoreboard") {
     return <><style>{CSS}</style><ScoreboardTV /></>;
   }
+  if (route === "setup" || route === "/setup") {
+    return <><style>{CSS}</style><SetupWizardPage standalone /></>;
+  }
 
   const content = () => {
     if (actor === "m-charlie") {
@@ -1731,6 +1877,7 @@ export default function App() {
       case "scoreboard": return <ScoreboardPage actor={actor} />;
       case "people": return <PeoplePage />;
       case "settings": return <SettingsPage />;
+      case "setup": return <SetupWizardPage />;
       default: return <TodayJames />;
     }
   };

@@ -92,8 +92,24 @@ async def lifespan(app: FastAPI):
     from pib.scheduler import setup_scheduler
     scheduler = await setup_scheduler(app, db)
 
+    # ── Sensor Bus ──
+    sensor_bus = None
+    try:
+        from pib.sensors.seed import seed_sensors
+        from pib.sensors.bus import SensorBus
+        await seed_sensors(db)
+        sensor_bus = SensorBus(db)
+        await sensor_bus.start()
+        app.state.sensor_bus = sensor_bus
+        log.info("Sensor bus initialized")
+    except Exception as e:
+        log.warning(f"Sensor bus init failed (non-fatal): {e}")
+        app.state.sensor_bus = None
+
     yield
 
+    if sensor_bus:
+        await sensor_bus.stop()
     if scheduler:
         scheduler.shutdown(wait=False)
     if _db:
@@ -1557,6 +1573,179 @@ async def spa_fallback(full_path: str):
         with open(index_path) as f:
             return HTMLResponse(content=f.read())
     raise HTTPException(status_code=404, detail="Frontend not built. Run: cd frontend && npm run build")
+
+
+# ═══════════════════════════════════════════════════════════════
+# SENSOR BUS API
+# ═══════════════════════════════════════════════════════════════
+
+
+@app.get("/api/sensors")
+async def list_sensors(category: str = None, enabled: bool = None):
+    """List all sensor configs."""
+    db = await get_db()
+    conditions = []
+    params = []
+    if category:
+        conditions.append("category = ?")
+        params.append(category)
+    if enabled is not None:
+        conditions.append("enabled = ?")
+        params.append(1 if enabled else 0)
+    where = " WHERE " + " AND ".join(conditions) if conditions else ""
+    rows = await db.execute_fetchall(
+        f"SELECT * FROM pib_sensor_config{where} ORDER BY layer, category, name", params
+    )
+    return JSONResponse(content={"sensors": [dict(r) for r in rows] if rows else []})
+
+
+@app.get("/api/sensors/{sensor_id}")
+async def get_sensor(sensor_id: str):
+    """Get a single sensor config + latest reading."""
+    db = await get_db()
+    config = await db.execute_fetchone(
+        "SELECT * FROM pib_sensor_config WHERE sensor_id = ?", [sensor_id]
+    )
+    if not config:
+        raise HTTPException(status_code=404, detail="Sensor not found")
+
+    latest = await db.execute_fetchone(
+        "SELECT * FROM pib_sensor_readings WHERE sensor_id = ? ORDER BY timestamp DESC LIMIT 1",
+        [sensor_id],
+    )
+    result = dict(config)
+    result["latest_reading"] = dict(latest) if latest else None
+    return JSONResponse(content=result)
+
+
+@app.patch("/api/sensors/{sensor_id}")
+async def update_sensor(sensor_id: str, request: Request):
+    """Enable/disable sensor, update config."""
+    db = await get_db()
+    body = await request.json()
+
+    existing = await db.execute_fetchone(
+        "SELECT 1 FROM pib_sensor_config WHERE sensor_id = ?", [sensor_id]
+    )
+    if not existing:
+        raise HTTPException(status_code=404, detail="Sensor not found")
+
+    allowed = {"enabled", "poll_interval_minutes", "privacy", "source_config", "enabled_for_members"}
+    sets = []
+    params = []
+    for key, value in body.items():
+        if key in allowed:
+            sets.append(f"{key} = ?")
+            params.append(json.dumps(value) if isinstance(value, (dict, list)) else value)
+
+    if not sets:
+        raise HTTPException(status_code=400, detail="No valid fields to update")
+
+    sets.append("updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')")
+    params.append(sensor_id)
+    await db.execute(f"UPDATE pib_sensor_config SET {', '.join(sets)} WHERE sensor_id = ?", params)
+    await db.commit()
+    return JSONResponse(content={"updated": sensor_id})
+
+
+@app.get("/api/sensors/{sensor_id}/readings")
+async def get_sensor_readings(sensor_id: str, hours: int = Query(default=24), limit: int = Query(default=100)):
+    """Get reading history for a sensor."""
+    db = await get_db()
+    from datetime import datetime, timedelta, timezone
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    rows = await db.execute_fetchall(
+        "SELECT * FROM pib_sensor_readings WHERE sensor_id = ? AND timestamp > ? ORDER BY timestamp DESC LIMIT ?",
+        [sensor_id, cutoff, limit],
+    )
+    results = []
+    for row in rows or []:
+        r = dict(row)
+        try:
+            r["value"] = json.loads(r["value"])
+        except (json.JSONDecodeError, TypeError):
+            pass
+        results.append(r)
+    return JSONResponse(content={"readings": results})
+
+
+@app.get("/api/sensor-alerts")
+async def list_sensor_alerts(status: str = Query(default="active"), severity: str = None):
+    """Get sensor alerts."""
+    db = await get_db()
+    conditions = ["status = ?"]
+    params = [status]
+    if severity:
+        conditions.append("severity = ?")
+        params.append(severity)
+    where = " AND ".join(conditions)
+    rows = await db.execute_fetchall(
+        f"SELECT * FROM pib_sensor_alerts WHERE {where} ORDER BY created_at DESC", params
+    )
+    return JSONResponse(content={"alerts": [dict(r) for r in rows] if rows else []})
+
+
+@app.patch("/api/sensor-alerts/{alert_id}")
+async def update_sensor_alert(alert_id: str, request: Request):
+    """Acknowledge or resolve a sensor alert."""
+    db = await get_db()
+    body = await request.json()
+    new_status = body.get("status")
+    if new_status not in ("acknowledged", "resolved"):
+        raise HTTPException(status_code=400, detail="Status must be 'acknowledged' or 'resolved'")
+
+    existing = await db.execute_fetchone(
+        "SELECT 1 FROM pib_sensor_alerts WHERE id = ?", [alert_id]
+    )
+    if not existing:
+        raise HTTPException(status_code=404, detail="Alert not found")
+
+    sets = ["status = ?"]
+    params = [new_status]
+    if new_status == "acknowledged":
+        sets.append("acknowledged_by = ?")
+        params.append(body.get("acknowledged_by", "user"))
+    elif new_status == "resolved":
+        sets.append("resolved_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')")
+    params.append(alert_id)
+    await db.execute(f"UPDATE pib_sensor_alerts SET {', '.join(sets)} WHERE id = ?", params)
+    await db.commit()
+    return JSONResponse(content={"updated": alert_id})
+
+
+@app.post("/webhooks/sensor/{sensor_id}")
+async def sensor_webhook(sensor_id: str, request: Request):
+    """Webhook endpoint for sensors that push data (health, homekit, etc.)."""
+    db = await get_db()
+    body = await request.json()
+
+    config = await db.execute_fetchone(
+        "SELECT * FROM pib_sensor_config WHERE sensor_id = ? AND enabled = 1", [sensor_id]
+    )
+    if not config:
+        raise HTTPException(status_code=404, detail="Sensor not found or not enabled")
+
+    bus = getattr(app.state, "sensor_bus", None)
+    if not bus:
+        from pib.sensors.bus import SensorBus
+        bus = SensorBus(db)
+
+    # Try to use the sensor's reading_from_webhook if available
+    from pib.sensors.protocol import SENSOR_REGISTRY
+    sensor_cls = SENSOR_REGISTRY.get(sensor_id)
+    if sensor_cls and hasattr(sensor_cls, "reading_from_webhook"):
+        member_id = body.get("member_id")
+        if sensor_cls.requires_member and member_id:
+            reading = sensor_cls.reading_from_webhook(body, member_id)
+        elif not sensor_cls.requires_member:
+            reading = sensor_cls.reading_from_webhook(body)
+        else:
+            raise HTTPException(status_code=400, detail="member_id required for this sensor")
+        stored = await bus._store_reading(reading)
+        await db.commit()
+        return JSONResponse(content={"stored": stored, "sensor_id": sensor_id})
+
+    raise HTTPException(status_code=400, detail="Sensor does not support webhook ingestion")
 
 
 # ═══════════════════════════════════════════════════════════════

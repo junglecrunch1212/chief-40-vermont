@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "pib"
 version = "5.0.0"
 description = "PIB v5 — ADHD-optimized household Chief-of-Staff"
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
@@ -16,6 +16,7 @@ dependencies = [
     "apscheduler>=3.10",
     "python-dotenv>=1.0",
     "pydantic>=2.0",
+    "astral>=3.2",
 ]
 
 [project.optional-dependencies]

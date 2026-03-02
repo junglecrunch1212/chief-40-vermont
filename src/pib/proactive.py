@@ -176,9 +176,212 @@ PROACTIVE_TRIGGERS = [
     },
 ]
 
+# ─── Sensor-Driven Triggers ───
+# These check pib_sensor_readings and pib_sensor_alerts for environmental conditions.
+
+SENSOR_TRIGGERS = [
+    {
+        "name": "weather_before_outdoor",
+        "priority": 3,
+        "cooldown_minutes": 120,
+        "description": "30 min before REQUIRES_TRANSPORT or outdoor event, check weather",
+        "sensor_query": (
+            "SELECT value FROM pib_sensor_readings "
+            "WHERE sensor_id = 'sensor-weather' AND reading_type = 'weather.current' "
+            "AND expires_at > datetime('now') ORDER BY timestamp DESC LIMIT 1"
+        ),
+        "calendar_condition": (
+            "SELECT 1 FROM cal_classified_events "
+            "WHERE event_date = date('now') AND scheduling_impact = 'REQUIRES_TRANSPORT' "
+            "AND time(start_time, '-30 minutes') <= time('now') "
+            "AND time(start_time) > time('now')"
+        ),
+    },
+    {
+        "name": "severe_weather_immediate",
+        "priority": 1,
+        "cooldown_minutes": 60,
+        "description": "Immediately on severe weather alerts",
+        "alert_query": (
+            "SELECT * FROM pib_sensor_alerts "
+            "WHERE sensor_id = 'sensor-weather' AND severity IN ('warning','critical') "
+            "AND status = 'active'"
+        ),
+    },
+    {
+        "name": "school_status_change",
+        "priority": 2,
+        "cooldown_minutes": 120,
+        "description": "School delay/closing/early dismissal detected",
+        "sensor_query": (
+            "SELECT value FROM pib_sensor_readings "
+            "WHERE sensor_id = 'sensor-school-alerts' AND reading_type = 'logistics.school' "
+            "AND expires_at > datetime('now') "
+            "AND json_extract(value, '$.status') != 'normal' "
+            "ORDER BY timestamp DESC LIMIT 1"
+        ),
+    },
+    {
+        "name": "departure_traffic_check",
+        "priority": 3,
+        "cooldown_minutes": 60,
+        "description": "45 min before REQUIRES_TRANSPORT, check traffic",
+        "calendar_condition": (
+            "SELECT 1 FROM cal_classified_events "
+            "WHERE event_date = date('now') AND scheduling_impact = 'REQUIRES_TRANSPORT' "
+            "AND time(start_time, '-45 minutes') <= time('now') "
+            "AND time(start_time) > time('now')"
+        ),
+    },
+    {
+        "name": "sleep_quality_adjustment",
+        "priority": 4,
+        "cooldown_minutes": 1440,
+        "description": "Morning: if sleep was poor/fair, adjust expectations",
+        "sensor_query": (
+            "SELECT value FROM pib_sensor_readings "
+            "WHERE sensor_id = 'sensor-health-sleep' AND reading_type = 'health.sleep.summary' "
+            "AND expires_at > datetime('now') "
+            "AND json_extract(value, '$.quality') IN ('poor', 'fair') "
+            "ORDER BY timestamp DESC LIMIT 1"
+        ),
+        "hour_range": (6, 10),
+    },
+    {
+        "name": "medication_not_taken",
+        "priority": 3,
+        "cooldown_minutes": 480,
+        "description": "45 min after scheduled med time, if not logged",
+        "sensor_query": (
+            "SELECT value FROM pib_sensor_readings "
+            "WHERE sensor_id = 'sensor-health-meds' AND reading_type = 'health.medication' "
+            "AND expires_at > datetime('now') "
+            "AND json_extract(value, '$.all_taken') = 0 "
+            "ORDER BY timestamp DESC LIMIT 1"
+        ),
+        "hour_range": (7, 12),
+    },
+    {
+        "name": "device_battery_coverage_risk",
+        "priority": 3,
+        "cooldown_minutes": 120,
+        "description": "Phone < 15% AND transport duty in next 2 hours",
+        "sensor_query": (
+            "SELECT value, member_id FROM pib_sensor_readings "
+            "WHERE sensor_id = 'sensor-apple-battery' AND reading_type = 'device.battery' "
+            "AND expires_at > datetime('now') "
+            "AND json_extract(value, '$.reachability_risk') = 1 "
+            "ORDER BY timestamp DESC LIMIT 1"
+        ),
+    },
+    {
+        "name": "package_delivery_awareness",
+        "priority": 5,
+        "cooldown_minutes": 240,
+        "description": "Package out for delivery",
+        "sensor_query": (
+            "SELECT value FROM pib_sensor_readings "
+            "WHERE sensor_id = 'sensor-packages' AND reading_type = 'logistics.packages' "
+            "AND expires_at > datetime('now') "
+            "AND json_extract(value, '$.expected_today') != '[]' "
+            "ORDER BY timestamp DESC LIMIT 1"
+        ),
+    },
+    {
+        "name": "appliance_done",
+        "priority": 5,
+        "cooldown_minutes": 60,
+        "description": "Washer/dryer cycle complete",
+        "sensor_query": (
+            "SELECT value FROM pib_sensor_readings "
+            "WHERE sensor_id = 'sensor-homekit' AND reading_type = 'home.state' "
+            "AND expires_at > datetime('now') "
+            "ORDER BY timestamp DESC LIMIT 1"
+        ),
+    },
+    {
+        "name": "sunset_outdoor_reminder",
+        "priority": 4,
+        "cooldown_minutes": 1440,
+        "description": "45 min before sunset if outdoor activity likely",
+        "sensor_query": (
+            "SELECT value FROM pib_sensor_readings "
+            "WHERE sensor_id = 'sensor-sun' AND reading_type = 'sun.times' "
+            "AND expires_at > datetime('now') "
+            "ORDER BY timestamp DESC LIMIT 1"
+        ),
+    },
+    {
+        "name": "pollen_allergy_morning",
+        "priority": 4,
+        "cooldown_minutes": 1440,
+        "description": "Morning if pollen high + member has allergy config",
+        "sensor_query": (
+            "SELECT value FROM pib_sensor_readings "
+            "WHERE sensor_id = 'sensor-weather' AND reading_type = 'weather.current' "
+            "AND expires_at > datetime('now') "
+            "ORDER BY timestamp DESC LIMIT 1"
+        ),
+        "hour_range": (6, 9),
+    },
+    {
+        "name": "uv_outdoor_advisory",
+        "priority": 4,
+        "cooldown_minutes": 240,
+        "description": "Before outdoor event if UV >= 6",
+        "sensor_query": (
+            "SELECT value FROM pib_sensor_readings "
+            "WHERE sensor_id = 'sensor-weather' AND reading_type = 'weather.current' "
+            "AND expires_at > datetime('now') "
+            "AND CAST(json_extract(value, '$.uv_index') AS INTEGER) >= 6 "
+            "ORDER BY timestamp DESC LIMIT 1"
+        ),
+    },
+    {
+        "name": "stress_trend_weekly",
+        "priority": 6,
+        "cooldown_minutes": 10080,
+        "description": "Sunday evening if HRV declining 3+ days",
+        "sensor_query": (
+            "SELECT value FROM pib_sensor_readings "
+            "WHERE sensor_id = 'sensor-health-heart' AND reading_type = 'health.heart.summary' "
+            "AND expires_at > datetime('now') "
+            "AND json_extract(value, '$.hrv_trend') = 'declining' "
+            "ORDER BY timestamp DESC LIMIT 1"
+        ),
+        "day_of_week": 6,
+        "hour_range": (17, 21),
+    },
+    {
+        "name": "focus_mode_message_hold",
+        "priority": 2,
+        "cooldown_minutes": 30,
+        "description": "Hold non-urgent messages when member in DND/Driving",
+        "sensor_query": (
+            "SELECT value, member_id FROM pib_sensor_readings "
+            "WHERE sensor_id = 'sensor-apple-focus' AND reading_type = 'device.focus' "
+            "AND expires_at > datetime('now') "
+            "AND json_extract(value, '$.active_focus') IN ('do_not_disturb', 'driving') "
+            "ORDER BY timestamp DESC LIMIT 1"
+        ),
+    },
+    {
+        "name": "rhythm_corroboration",
+        "priority": 6,
+        "cooldown_minutes": 240,
+        "description": "Sensor data confirms or contradicts a rhythm",
+        "sensor_query": (
+            "SELECT value FROM pib_sensor_readings "
+            "WHERE sensor_id = 'sensor-wifi-presence' AND reading_type = 'home.wifi_presence' "
+            "AND expires_at > datetime('now') "
+            "ORDER BY timestamp DESC LIMIT 1"
+        ),
+    },
+]
+
 
 async def scan_triggers(db, member_id: str) -> list[dict]:
-    """Scan all proactive triggers and return those that fired."""
+    """Scan all proactive triggers (core + sensor) and return those that fired."""
     fired = []
     now = datetime.now()
 
@@ -187,6 +390,7 @@ async def scan_triggers(db, member_id: str) -> list[dict]:
         log.debug(f"Proactive blocked: {reason}")
         return []
 
+    # ── Core triggers ──
     for trigger in PROACTIVE_TRIGGERS:
         # Check cooldown
         last = await db.execute_fetchone(
@@ -219,6 +423,66 @@ async def scan_triggers(db, member_id: str) -> list[dict]:
                 if "c" in dict(result) and result["c"] == 0:
                     continue
                 fired.append({"trigger": trigger["name"], "data": dict(result)})
+
+    # ── Sensor triggers ──
+    fired.extend(await _scan_sensor_triggers(db, member_id, now))
+
+    return fired
+
+
+async def _scan_sensor_triggers(db, member_id: str, now: datetime) -> list[dict]:
+    """Scan sensor-driven triggers. Graceful — if sensor tables don't exist, returns []."""
+    fired = []
+    try:
+        for trigger in SENSOR_TRIGGERS:
+            # Check cooldown
+            last = await db.execute_fetchone(
+                "SELECT MAX(created_at) as last_fired FROM mem_cos_activity "
+                "WHERE description LIKE ? AND created_at >= datetime('now', ?)",
+                [f"%{trigger['name']}%", f"-{trigger['cooldown_minutes']} minutes"],
+            )
+            if last and last["last_fired"]:
+                continue
+
+            # Check hour_range
+            if "hour_range" in trigger:
+                start_h, end_h = trigger["hour_range"]
+                if not (start_h <= now.hour < end_h):
+                    continue
+
+            # Check day_of_week
+            if "day_of_week" in trigger and now.weekday() != trigger["day_of_week"]:
+                continue
+
+            # Check calendar_condition (if present, must match for trigger to fire)
+            if "calendar_condition" in trigger:
+                cal_result = await db.execute_fetchone(trigger["calendar_condition"])
+                if not cal_result:
+                    continue
+
+            # Check alert_query (for alert-based triggers)
+            if "alert_query" in trigger:
+                alert_result = await db.execute_fetchone(trigger["alert_query"])
+                if alert_result:
+                    fired.append({"trigger": trigger["name"], "data": dict(alert_result)})
+                continue
+
+            # Check sensor_query
+            if "sensor_query" in trigger:
+                result = await db.execute_fetchone(trigger["sensor_query"])
+                if result:
+                    data = dict(result)
+                    # Parse value JSON if present
+                    if "value" in data and isinstance(data["value"], str):
+                        try:
+                            data["value"] = json.loads(data["value"])
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+                    fired.append({"trigger": trigger["name"], "data": data})
+
+    except Exception as e:
+        # Sensor tables may not exist yet — graceful degradation
+        log.debug(f"Sensor trigger scan skipped: {e}")
 
     return fired
 

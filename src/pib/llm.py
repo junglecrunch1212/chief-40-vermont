@@ -801,26 +801,180 @@ SELECT
 
 
 async def build_cross_domain_summary(db) -> str:
-    """Build the always-on 500-token cross-domain summary."""
+    """Build the always-on ~500-token cross-domain summary.
+
+    Enriched with sensor data when available:
+    - Weather summary (temp, condition, alerts)
+    - Sun times (sunrise/sunset)
+    - Per-member health context (privacy-filtered)
+    - Home occupancy
+    - Deliveries
+    - Active sensor alerts
+    """
     row = await db.execute_fetchone(CROSS_DOMAIN_SUMMARY_SQL)
     if not row:
         return "No data available."
 
-    parts = []
-    if row["active_tasks"]:
-        parts.append(f"Active tasks: {row['active_tasks']}")
-    if row["overdue_tasks"]:
-        parts.append(f"Overdue: {row['overdue_tasks']}")
-    if row["due_today"]:
-        parts.append(f"Due today: {row['due_today']}")
-    if row["open_conflicts"]:
-        parts.append(f"Calendar conflicts: {row['open_conflicts']}")
-    if row["budget_alerts"]:
-        parts.append(f"Budget alerts: {row['budget_alerts']}")
-    if row["active_phase"]:
-        parts.append(f"Phase: {row['active_phase']}")
+    lines = []
 
-    return " | ".join(parts) if parts else "All clear."
+    # ── Core stats ──
+    core_parts = []
+    if row["active_tasks"]:
+        task_desc = f"{row['active_tasks']} tasks"
+        if row["overdue_tasks"]:
+            task_desc += f" ({row['overdue_tasks']} overdue)"
+        core_parts.append(task_desc)
+    if row["due_today"]:
+        core_parts.append(f"{row['due_today']} due today")
+    if row["open_conflicts"]:
+        core_parts.append(f"{row['open_conflicts']} conflicts")
+    if row["budget_alerts"]:
+        core_parts.append(f"{row['budget_alerts']} budget alerts")
+    if core_parts:
+        lines.append(" | ".join(core_parts))
+
+    # ── Daily state (includes sensor enrichment) ──
+    daily = await db.execute_fetchone(
+        "SELECT * FROM cal_daily_states WHERE state_date = date('now') ORDER BY version DESC LIMIT 1"
+    )
+    if daily:
+        complexity = daily["complexity_score"]
+        lines.append(f"Complexity: {complexity:.1f}/10")
+
+        # Parse member_states for health context
+        try:
+            member_states = json.loads(daily["member_states"] or "{}")
+            for mid, mstate in member_states.items():
+                health = mstate.get("health", {})
+                if not health:
+                    continue
+                member_parts = [mid.replace("m-", "").title()]
+                # Privacy: only derived impacts, not raw data
+                energy = health.get("energy_level")
+                if energy and energy != "medium":
+                    member_parts.append(f"energy: {energy}")
+                focus = health.get("focus_mode")
+                if focus:
+                    member_parts.append(f"focus: {focus}")
+                if health.get("battery_warning"):
+                    member_parts.append("low battery")
+                sleep_q = health.get("sleep_quality")
+                if sleep_q and sleep_q != "unknown":
+                    member_parts.append(f"sleep: {sleep_q}")
+                if len(member_parts) > 1:
+                    lines.append("  " + " | ".join(member_parts))
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    # ── Sensor context (weather, sun, etc.) ──
+    sensor_lines = await _build_sensor_summary_lines(db)
+    lines.extend(sensor_lines)
+
+    # ── Phase ──
+    if row["active_phase"]:
+        lines.append(f"Phase: {row['active_phase']}")
+
+    return "\n".join(lines) if lines else "All clear."
+
+
+async def _build_sensor_summary_lines(db) -> list[str]:
+    """Build sensor-enriched summary lines for the cross-domain summary."""
+    lines = []
+
+    try:
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        # Weather
+        weather = await db.execute_fetchone(
+            """SELECT value FROM pib_sensor_readings
+               WHERE sensor_id = 'sensor-weather' AND reading_type = 'weather.current'
+                 AND expires_at > ?
+               ORDER BY timestamp DESC LIMIT 1""",
+            [now],
+        )
+        if weather:
+            try:
+                wv = json.loads(weather["value"])
+                w_parts = []
+                if wv.get("condition_text"):
+                    w_parts.append(wv["condition_text"])
+                if wv.get("temp_f") is not None:
+                    w_parts.append(f"{wv['temp_f']}\u00b0F")
+                if wv.get("uv_index") and wv["uv_index"] >= 6:
+                    w_parts.append(f"UV {wv['uv_index']}")
+                pollen = wv.get("pollen", {})
+                high_pollen = [k for k, v in pollen.items() if v == "high"]
+                if high_pollen:
+                    w_parts.append(f"pollen high")
+                if w_parts:
+                    lines.append("Weather: " + ", ".join(w_parts))
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        # Sun
+        sun = await db.execute_fetchone(
+            """SELECT value FROM pib_sensor_readings
+               WHERE sensor_id = 'sensor-sun' AND reading_type = 'sun.times'
+                 AND expires_at > ?
+               ORDER BY timestamp DESC LIMIT 1""",
+            [now],
+        )
+        if sun:
+            try:
+                sv = json.loads(sun["value"])
+                if sv.get("sunrise") and sv.get("sunset"):
+                    lines.append(f"Sun: rises {sv['sunrise']}, sets {sv['sunset']}")
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        # WiFi presence
+        wifi = await db.execute_fetchone(
+            """SELECT value FROM pib_sensor_readings
+               WHERE sensor_id = 'sensor-wifi-presence' AND reading_type = 'home.wifi_presence'
+                 AND expires_at > ?
+               ORDER BY timestamp DESC LIMIT 1""",
+            [now],
+        )
+        if wifi:
+            try:
+                wfv = json.loads(wifi["value"])
+                home = wfv.get("members_home", [])
+                if home:
+                    names = [m.replace("m-", "").title() for m in home]
+                    lines.append(f"Home: {', '.join(names)}")
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        # Deliveries
+        pkgs = await db.execute_fetchone(
+            """SELECT value FROM pib_sensor_readings
+               WHERE sensor_id = 'sensor-packages' AND reading_type = 'logistics.packages'
+                 AND expires_at > ?
+               ORDER BY timestamp DESC LIMIT 1""",
+            [now],
+        )
+        if pkgs:
+            try:
+                pv = json.loads(pkgs["value"])
+                today_count = len(pv.get("expected_today", []))
+                if today_count > 0:
+                    lines.append(f"Deliveries: {today_count} expected today")
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        # Active sensor alerts
+        alerts = await db.execute_fetchall(
+            "SELECT severity, title FROM pib_sensor_alerts WHERE status = 'active' ORDER BY severity DESC LIMIT 3"
+        )
+        for alert in alerts or []:
+            severity_icon = {"critical": "!!", "warning": "!", "info": ""}.get(alert["severity"], "")
+            lines.append(f"  {severity_icon} {alert['title']}")
+
+    except Exception:
+        pass  # Sensor tables may not exist yet — graceful degradation
+
+    return lines
 
 
 # ─── Privacy-Filtered Calendar Context ───

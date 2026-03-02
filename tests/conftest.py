@@ -111,7 +111,7 @@ async def seed_test_data(db: aiosqlite.Connection):
         )
 
     # ID sequences
-    for prefix in ["tsk", "mem", "lst", "itm", "c", "vs", "vp"]:
+    for prefix in ["tsk", "mem", "lst", "itm", "c", "vs", "vp", "sns"]:
         await db.execute(
             "INSERT OR IGNORE INTO common_id_sequences (prefix, next_val) VALUES (?, 100)",
             [prefix],

@@ -427,6 +427,9 @@ async def scan_triggers(db, member_id: str) -> list[dict]:
     # ── Sensor triggers ──
     fired.extend(await _scan_sensor_triggers(db, member_id, now))
 
+    # ── Capture triggers ──
+    fired.extend(await _scan_capture_triggers(db, member_id, now))
+
     return fired
 
 
@@ -487,6 +490,110 @@ async def _scan_sensor_triggers(db, member_id: str, now: datetime) -> list[dict]
     return fired
 
 
+# ─── Capture Triggers ───
+
+CAPTURE_TRIGGERS = [
+    {
+        "name": "capture_weekly_review",
+        "priority": 5,
+        "cooldown_minutes": 10080,  # 7 days
+        "day_of_week": 6,  # Sunday
+        "hour_range": (17, 21),  # 5-9 PM
+        "description": "Weekly review of unorganized captures",
+    },
+    {
+        "name": "capture_resurface",
+        "priority": 6,
+        "cooldown_minutes": 480,  # 8 hours
+        "description": "Surface a relevant organized capture",
+    },
+    {
+        "name": "capture_connection_discovery",
+        "priority": 7,
+        "cooldown_minutes": 1440,  # 24 hours
+        "description": "Cross-user connection discovery on household captures",
+    },
+    {
+        "name": "capture_stale_inbox",
+        "priority": 8,
+        "cooldown_minutes": 2880,  # 48 hours
+        "description": "Nudge about captures sitting in inbox > 3 days",
+    },
+]
+
+
+async def _scan_capture_triggers(db, member_id: str, now: datetime) -> list[dict]:
+    """Scan capture-related proactive triggers. Graceful — if cap tables don't exist, returns []."""
+    fired = []
+    try:
+        for trigger in CAPTURE_TRIGGERS:
+            # Check cooldown
+            last = await db.execute_fetchone(
+                "SELECT MAX(created_at) as last_fired FROM mem_cos_activity "
+                "WHERE description LIKE ? AND created_at >= datetime('now', ?)",
+                [f"%{trigger['name']}%", f"-{trigger['cooldown_minutes']} minutes"],
+            )
+            if last and last["last_fired"]:
+                continue
+
+            # Check day_of_week
+            if "day_of_week" in trigger and now.weekday() != trigger["day_of_week"]:
+                continue
+
+            # Check hour_range
+            if "hour_range" in trigger:
+                start_h, end_h = trigger["hour_range"]
+                if not (start_h <= now.hour < end_h):
+                    continue
+
+            # Trigger-specific conditions
+            if trigger["name"] == "capture_weekly_review":
+                count = await db.execute_fetchone(
+                    "SELECT COUNT(*) as c FROM cap_captures "
+                    "WHERE member_id = ? AND triage_status IN ('raw','triaged') AND archived = 0",
+                    [member_id],
+                )
+                if count and count["c"] > 0:
+                    fired.append({"trigger": trigger["name"], "data": {"count": count["c"]}})
+
+            elif trigger["name"] == "capture_resurface":
+                from pib.capture import get_captures_for_resurfacing
+                resurfaceable = await get_captures_for_resurfacing(db, member_id, limit=1)
+                if resurfaceable:
+                    cap = resurfaceable[0]
+                    fired.append({"trigger": trigger["name"], "data": {
+                        "capture_id": cap["id"],
+                        "title": cap.get("title") or cap["raw_text"][:80],
+                        "type": cap["capture_type"],
+                    }})
+
+            elif trigger["name"] == "capture_connection_discovery":
+                # Check for household-visible captures that haven't had connection discovery
+                count = await db.execute_fetchone(
+                    "SELECT COUNT(*) as c FROM cap_captures "
+                    "WHERE member_id = ? AND household_visible = 1 AND triage_status = 'organized' "
+                    "AND id NOT IN (SELECT source_capture_id FROM cap_connections WHERE created_by = 'cross_user_discovery')",
+                    [member_id],
+                )
+                if count and count["c"] > 0:
+                    fired.append({"trigger": trigger["name"], "data": {"count": count["c"]}})
+
+            elif trigger["name"] == "capture_stale_inbox":
+                count = await db.execute_fetchone(
+                    "SELECT COUNT(*) as c FROM cap_captures "
+                    "WHERE member_id = ? AND notebook = 'inbox' AND archived = 0 "
+                    "AND created_at < datetime('now', '-3 days')",
+                    [member_id],
+                )
+                if count and count["c"] > 0:
+                    fired.append({"trigger": trigger["name"], "data": {"count": count["c"]}})
+
+    except Exception as e:
+        log.debug(f"Capture trigger scan skipped: {e}")
+
+    return fired
+
+
 # ─── Morning Digest ───
 
 async def build_morning_digest_data(db, member_id: str) -> dict:
@@ -525,6 +632,16 @@ async def build_morning_digest_data(db, member_id: str) -> dict:
         "SELECT category, pct_used FROM fin_budget_snapshot WHERE over_threshold = 1"
     )
 
+    # High-priority captures
+    high_priority_captures = []
+    try:
+        from pib.capture import list_captures
+        hp = await list_captures(db, member_id, priority="high", limit=3)
+        high_priority_captures = [{"id": c["id"], "title": c.get("title") or c["raw_text"][:80],
+                                   "type": c["capture_type"]} for c in hp]
+    except Exception:
+        pass  # Capture tables may not exist yet
+
     return {
         "date": today.isoformat(),
         "member_id": member_id,
@@ -535,4 +652,5 @@ async def build_morning_digest_data(db, member_id: str) -> dict:
         "custody": custody_text,
         "budget_alerts": [dict(a) for a in budget_alerts] if budget_alerts else [],
         "completions_today": wn.completions_today,
+        "high_priority_captures": high_priority_captures,
     }

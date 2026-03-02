@@ -1749,6 +1749,190 @@ async def sensor_webhook(sensor_id: str, request: Request):
 
 
 # ═══════════════════════════════════════════════════════════════
+# Capture Domain — Second Brain
+# ═══════════════════════════════════════════════════════════════
+
+
+@app.post("/api/captures")
+async def create_capture_endpoint(request: Request):
+    """Create a capture. Minimal friction — just text required."""
+    db = await get_db()
+    body = await request.json()
+    text = body.get("text", "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="text is required")
+
+    member_id = body.get("member_id", "m-james")
+    source = body.get("source", "api")
+    household_visible = body.get("household_visible", False)
+
+    from pib.capture import create_capture
+    capture = await create_capture(
+        db, member_id, text,
+        source=source,
+        source_ref=body.get("source_ref"),
+        household_visible=household_visible,
+    )
+    return JSONResponse(content=capture)
+
+
+@app.get("/api/captures")
+async def list_captures_endpoint(
+    member_id: str = "m-james",
+    notebook: str = None,
+    capture_type: str = None,
+    priority: str = None,
+    include_household: bool = False,
+    search: str = None,
+    pinned: bool = False,
+    limit: int = 50,
+    offset: int = 0,
+):
+    """List captures with multi-filter support."""
+    db = await get_db()
+    from pib.capture import list_captures
+    captures = await list_captures(
+        db, member_id,
+        notebook=notebook,
+        capture_type=capture_type,
+        priority=priority,
+        include_household=include_household,
+        search=search,
+        pinned_only=pinned,
+        limit=limit,
+        offset=offset,
+    )
+    return JSONResponse(content=captures)
+
+
+@app.get("/api/captures/search")
+async def search_captures_endpoint(
+    q: str = Query(...),
+    member_id: str = "m-james",
+    include_household: bool = False,
+    limit: int = 20,
+):
+    """FTS5 search across captures."""
+    db = await get_db()
+    from pib.capture import search_captures_fts
+    results = await search_captures_fts(
+        db, q, member_id,
+        include_household=include_household,
+        limit=limit,
+    )
+    return JSONResponse(content=results)
+
+
+@app.get("/api/captures/{capture_id}")
+async def get_capture_endpoint(capture_id: str, member_id: str = "m-james"):
+    """Get a single capture by ID."""
+    db = await get_db()
+    from pib.capture import get_capture
+    capture = await get_capture(db, capture_id, member_id)
+    if not capture:
+        raise HTTPException(status_code=404, detail="Capture not found")
+    return JSONResponse(content=capture)
+
+
+@app.patch("/api/captures/{capture_id}")
+async def update_capture_endpoint(capture_id: str, request: Request):
+    """Update capture fields."""
+    db = await get_db()
+    body = await request.json()
+    member_id = body.pop("member_id", "m-james")
+
+    from pib.capture import update_capture
+    result = await update_capture(db, capture_id, member_id, body)
+    if not result:
+        raise HTTPException(status_code=404, detail="Capture not found or not owned")
+    return JSONResponse(content=result)
+
+
+@app.post("/api/captures/{capture_id}/archive")
+async def archive_capture_endpoint(capture_id: str, request: Request):
+    """Archive a capture."""
+    db = await get_db()
+    body = await request.json()
+    member_id = body.get("member_id", "m-james")
+
+    from pib.capture import archive_capture
+    ok = await archive_capture(db, capture_id, member_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Capture not found or not owned")
+    return JSONResponse(content={"archived": capture_id})
+
+
+@app.post("/api/captures/{capture_id}/share")
+async def share_capture_endpoint(capture_id: str, request: Request):
+    """Toggle household visibility."""
+    db = await get_db()
+    body = await request.json()
+    member_id = body.get("member_id", "m-james")
+    visible = body.get("household_visible", True)
+
+    from pib.capture import update_capture
+    result = await update_capture(
+        db, capture_id, member_id,
+        {"household_visible": 1 if visible else 0},
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Capture not found or not owned")
+    return JSONResponse(content={"capture_id": capture_id, "household_visible": visible})
+
+
+@app.get("/api/captures/{capture_id}/connections")
+async def capture_connections_endpoint(capture_id: str):
+    """Get connections for a capture."""
+    db = await get_db()
+    from pib.capture import get_connections
+    connections = await get_connections(db, capture_id)
+    return JSONResponse(content=connections)
+
+
+@app.get("/api/notebooks")
+async def list_notebooks_endpoint(member_id: str = "m-james"):
+    """List notebooks for a member."""
+    db = await get_db()
+    from pib.capture import get_notebook_list
+    notebooks = await get_notebook_list(db, member_id)
+    return JSONResponse(content=notebooks)
+
+
+@app.post("/api/notebooks")
+async def create_notebook_endpoint(request: Request):
+    """Create a custom notebook."""
+    db = await get_db()
+    body = await request.json()
+    member_id = body.get("member_id", "m-james")
+    name = body.get("name", "").strip()
+    slug = body.get("slug", "").strip()
+    if not name or not slug:
+        raise HTTPException(status_code=400, detail="name and slug are required")
+
+    from pib.capture import create_notebook
+    nb = await create_notebook(
+        db, member_id, name, slug,
+        icon=body.get("icon"),
+        description=body.get("description"),
+    )
+    return JSONResponse(content=nb)
+
+
+@app.patch("/api/notebooks/{notebook_id}")
+async def update_notebook_endpoint(notebook_id: str, request: Request):
+    """Update a notebook."""
+    db = await get_db()
+    body = await request.json()
+    member_id = body.pop("member_id", "m-james")
+
+    from pib.capture import update_notebook
+    result = await update_notebook(db, notebook_id, member_id, body)
+    if not result:
+        raise HTTPException(status_code=404, detail="Notebook not found or not owned")
+    return JSONResponse(content=dict(result))
+
+
+# ═══════════════════════════════════════════════════════════════
 # APP ENTRY POINT
 # ═══════════════════════════════════════════════════════════════
 

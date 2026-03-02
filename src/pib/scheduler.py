@@ -112,6 +112,20 @@ async def setup_scheduler(app, db):
         args=[_synthesize_voice_profiles, db], id="synthesize_voice_profiles",
     )
 
+    # ─── Capture Domain ───
+    scheduler.add_job(
+        _safe_job, CronTrigger.from_crontab("*/30 7-23 * * *"),
+        args=[_capture_deep_organizer, db], id="capture_deep_organizer",
+    )
+    scheduler.add_job(
+        _safe_job, CronTrigger.from_crontab("0 3 * * *"),
+        args=[_capture_stale_cleanup, db], id="capture_stale_cleanup",
+    )
+    scheduler.add_job(
+        _safe_job, CronTrigger.from_crontab("0 2 * * 0"),
+        args=[_capture_fts5_rebuild, db], id="capture_fts5_rebuild",
+    )
+
     scheduler.start()
     log.info(f"Scheduler started with {len(scheduler.get_jobs())} jobs")
     return scheduler
@@ -350,6 +364,16 @@ async def _compute_daily_states(db):
     except Exception as e:
         log.warning(f"Sensor enrichment failed (non-fatal): {e}")
 
+    # ── 8b. Capture enrichment (graceful — no-op if no cap tables) ──
+    try:
+        from pib.capture import get_capture_stats
+        for m in members or []:
+            stats = await get_capture_stats(db, m["id"])
+            if m["id"] in member_states:
+                member_states[m["id"]]["capture_stats"] = stats
+    except Exception:
+        pass  # Capture tables may not exist yet
+
     # ── 9. Complexity score ──
     state["complexity_score"] = compute_complexity_score(state)
 
@@ -506,3 +530,42 @@ async def _synthesize_voice_profiles(db):
         total += count
     if total > 0:
         log.info(f"Synthesized {total} voice profiles")
+
+
+# ─── Capture Domain Jobs ───
+
+
+async def _capture_deep_organizer(db):
+    """Run deep organizer on triaged captures every 30 min (7 AM - 11 PM)."""
+    try:
+        from pib.capture_organizer import organize_batch
+        count = await organize_batch(db)
+        if count > 0:
+            log.info(f"Deep organizer processed {count} captures")
+    except Exception as e:
+        log.debug(f"Capture deep organizer skipped: {e}")
+
+
+async def _capture_stale_cleanup(db):
+    """Auto-archive inbox captures > 30 days (3 AM daily)."""
+    try:
+        cursor = await db.execute(
+            "UPDATE cap_captures SET archived = 1, archived_at = strftime('%Y-%m-%dT%H:%M:%SZ','now') "
+            "WHERE notebook = 'inbox' AND archived = 0 "
+            "AND created_at < datetime('now', '-30 days')"
+        )
+        await db.commit()
+        if cursor.rowcount > 0:
+            log.info(f"Auto-archived {cursor.rowcount} stale inbox captures")
+    except Exception as e:
+        log.debug(f"Capture stale cleanup skipped: {e}")
+
+
+async def _capture_fts5_rebuild(db):
+    """Weekly rebuild of capture FTS5 index (Sunday 2 AM)."""
+    try:
+        await db.execute("INSERT INTO cap_captures_fts(cap_captures_fts) VALUES('rebuild')")
+        await db.commit()
+        log.info("Capture FTS5 index rebuilt")
+    except Exception as e:
+        log.debug(f"Capture FTS5 rebuild skipped: {e}")

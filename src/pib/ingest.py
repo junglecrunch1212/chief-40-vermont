@@ -58,6 +58,15 @@ PREFIX_RULES = [
     (r"^remember\s+(.+)", "memory", {"action": "save_fact"}),
     (r"^meds\s*(taken)?", "state", {"action": "medication_taken"}),
     (r"^sleep\s+(great|okay|rough)", "state", {"action": "sleep_report"}),
+    # Capture domain — zero-friction Second Brain
+    (r"^note:\s*(.+)", "capture", {"capture_type": "note"}),
+    (r"^idea:\s*(.+)", "capture", {"capture_type": "idea"}),
+    (r"^recipe:\s*(.+)", "capture", {"capture_type": "recipe"}),
+    (r"^bookmark:\s*(.+)", "capture", {"capture_type": "bookmark"}),
+    (r"^quote:\s*(.+)", "capture", {"capture_type": "quote"}),
+    (r"^question:\s*(.+)", "capture", {"capture_type": "question"}),
+    (r"^ref:\s*(.+)", "capture", {"capture_type": "reference"}),
+    (r"^capture:\s*(.+)", "capture", {"capture_type": "note"}),
 ]
 
 
@@ -240,5 +249,12 @@ async def route_prefix(db, prefix_result: dict, event: IngestEvent) -> dict:
 
     elif shape == "memory":
         return {"action": "memory_save", "content": content}
+
+    elif shape == "capture":
+        from pib.capture import create_capture
+        member = event.member_id or "m-james"
+        capture = await create_capture(db, member, content, source="prefix", source_ref=event.idempotency_key)
+        return {"action": "capture_created", "capture_id": capture["id"], "type": capture["capture_type"],
+                "notebook": capture["notebook"]}
 
     return {"action": "unknown_shape", "shape": shape}

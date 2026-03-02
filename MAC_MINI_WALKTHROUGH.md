@@ -689,7 +689,230 @@ Start with Phase 1 from AGENTS.md. Run all probes from integration spec §9
 when done.
 ```
 
-Then wait. The agent will work autonomously. It'll take 2-4 hours. Check back periodically — it may ask you to approve something.
+Wait for the agent to finish. It'll take 1-2 hours for this first phase. When it says it's done (or asks a question), move to Prompt 2.
+
+---
+
+### Prompt 2: Verify Core Engine
+
+**When to paste:** After the agent says Phase 1 is done (repo cloned, Python installed, cli.py written, SQLite initialized, tests passing).
+
+**What to look for first:** The agent should have reported probe results from integration spec §9. If any probes failed, ask it to fix them before continuing.
+
+```
+Run these checks and show me the results:
+
+1. python3 -m pib.cli what-now --member m-james --json
+2. python3 -m pib.cli custody --json  
+3. cd pib && pytest tests/ -v (show pass/fail count)
+4. ls -la state/pib.db (confirm database exists)
+
+If anything fails, fix it before we continue.
+```
+
+---
+
+### Prompt 3: Wire Calendar Pipeline
+
+**When to paste:** After Prompt 2 checks all pass.
+
+```
+Now build the calendar pipeline. This is the #1 priority from 
+docs/bootstrap-readiness-task-plan.md task T-010.
+
+Use gog CLI to read calendar events. Write scripts/core/calendar_sync.mjs 
+that calls gog and feeds events into pib.cli calendar-ingest.
+
+Start with: gog calendar list --no-input --json
+to discover available calendars. Then classify them per the source 
+classification model in the build spec (Gene 1: discover → propose → confirm).
+
+Show me what calendars you found and propose classifications before writing 
+any events to the database. I need to confirm which are full/privileged/redacted.
+```
+
+**What happens:** The agent will list your calendars and ask you to classify them. It'll say something like "I found 12 calendars, here's what I think each one is." You confirm or correct, then it wires the pipeline.
+
+---
+
+### Prompt 4: Confirm Calendar Classifications
+
+**When to paste:** After the agent shows you calendar proposals.
+
+```
+Here are my confirmations:
+- [calendar name]: full (or privileged, or redacted)
+- [repeat for each]
+
+(Use these rules:
+- James's personal calendars: full
+- Laura's work calendar: privileged (existence + timing only, NEVER titles)
+- Laura's personal calendar: full  
+- Charlie's school/soccer: full
+- Coparent calendar: full but read-only
+- Family shared calendar: full)
+
+Now apply these classifications, run the first calendar sync, and verify 
+that whatNow() can see today's events:
+python3 -m pib.cli what-now --member m-james --json
+```
+
+---
+
+### Prompt 5: Wire Tasks + Financial Sync
+
+**When to paste:** After calendar pipeline is working and whatNow shows today's events.
+
+```
+Now wire the data sync pipelines from docs/bootstrap-readiness-task-plan.md:
+
+1. T-013 Tasks: Read the Life OS Google Sheet (TASKS tab) via gog sheets 
+   and hydrate ops_tasks in SQLite. The Sheet ID will be in the gog sheets 
+   list output. Sync should be one-directional: Sheets → SQLite for initial 
+   hydration, then SQLite is the SSOT going forward.
+
+2. T-012 Finance: Read the Financial OS Google Sheet via gog sheets and 
+   populate fin_transactions + recompute fin_budget_snapshot.
+
+After both syncs complete, verify:
+- python3 -m pib.cli what-now --member m-james --json (should show real tasks)
+- python3 -m pib.cli budget --json (should show real budget data)
+```
+
+---
+
+### Prompt 6: Wire Outbound Messaging + Proactive Engine
+
+**When to paste:** After tasks and financial data are in SQLite.
+
+```
+Now wire outbound messaging and the proactive engine 
+(T-020 and T-021 from bootstrap-readiness-task-plan.md).
+
+1. Set up OpenClaw cron jobs for all 16 scheduled tasks listed in 
+   docs/openclaw-integration.md §3.3. Each one calls pib.cli via exec.
+
+2. Wire the proactive engine so that when triggers fire, messages get 
+   delivered through OpenClaw channels (not just logged to mem_cos_activity).
+
+3. Test the morning digest: run python3 -m pib.cli morning-digest --member m-james --json
+   and show me what it would send.
+
+4. Send me a test message through [Signal/WhatsApp/iMessage — pick whichever 
+   channel is connected] saying "PIB is alive. Your next task is: [whatever 
+   whatNow returns]"
+```
+
+---
+
+### Prompt 7: Build Scoreboard + Console
+
+**When to paste:** After you receive the test message on your phone.
+
+```
+Now build the surfaces (T-030 through T-033 from bootstrap-readiness-task-plan.md).
+
+1. Scoreboard: Build a real HTML/CSS page at /scoreboard on the console 
+   server (port 3333). Three columns (James, Laura, Charlie). Pull data from 
+   /api/scoreboard-data. Dark mode, auto-refresh every 60 seconds, readable 
+   from across the room. Make it fun — streaks, fire emoji, weekly winner.
+
+2. ADHD Stream: Build James's carousel view per build spec §2.1. One card 
+   at a time. Micro-script prominent. Energy state visible.
+
+3. Console chat: Add a chat widget that sends messages to the OpenClaw agent 
+   and shows responses.
+
+After building, show me the URLs:
+- Console: http://localhost:3333/
+- Scoreboard: http://localhost:3333/scoreboard
+
+And verify the scoreboard data endpoint works:
+curl http://localhost:3333/api/scoreboard-data | python3 -m json.tool
+```
+
+---
+
+### Prompt 8: Expand SOUL.md + AGENTS.md
+
+**When to paste:** After scoreboard and console are working.
+
+```
+Now that everything is wired, expand the agent files:
+
+1. Rewrite SOUL.md with the full PIB personality from pib-v5-build-spec.md 
+   §2 (all four actor descriptions, coaching protocols, the Nine Genes 
+   behavioral rules). Include the privacy rules for Laura's calendar, the 
+   ADHD coaching style for James, and the compassionate streak protocol.
+
+2. Rewrite AGENTS.md with complete message routing tables per 
+   docs/openclaw-integration.md §4.2. Every type of query should map to a 
+   specific pib.cli command. Include the hard rule: "For factual queries 
+   (what's next, who has Charlie, calendar, budget), ALWAYS call the script. 
+   Never answer from your own reasoning."
+
+3. Update HEARTBEAT.md with all health checks from T-040.
+
+Show me the final SOUL.md and AGENTS.md for review before committing.
+```
+
+---
+
+### Prompt 9: Hardening + Go-Live
+
+**When to paste:** After you've reviewed and approved the expanded agent files.
+
+```
+Final phase — hardening from bootstrap-readiness-task-plan.md Phase 5:
+
+1. T-041: Set up automated SQLite backups (hourly copy + daily verification)
+2. T-043: Verify all pib.cli commands output clean JSON, no PII in logs
+3. T-050: Verify launchd plists survive a reboot test (just check they're 
+   loaded, don't actually reboot yet)
+4. T-002: Run the privacy canary tests — assert that privileged calendar 
+   titles never appear in assembled context
+
+Then run the full go-live checklist from the bottom of 
+docs/bootstrap-readiness-task-plan.md and show me results for every checkbox.
+```
+
+---
+
+### Prompt 10: Final Reboot Test
+
+**When to paste:** After all go-live checklist items are green.
+
+```
+Everything looks good. I'm going to reboot the Mac Mini now to verify 
+auto-start works. After reboot, I'll come back and check:
+
+1. openclaw gateway status (should be running)
+2. curl http://localhost:3333/api/household-status (console should respond)
+3. Send "what's next?" from my phone (messaging should work)
+
+Don't do anything — just be ready to respond when I come back after reboot.
+```
+
+**Then:** In Terminal, type `sudo reboot`. Wait 2-3 minutes. SSH back in. Run those three checks. If they all pass, you're live.
+
+---
+
+### Quick Reference: All 10 Prompts
+
+| # | When | What it does | Time |
+|---|---|---|---|
+| 1 | After pre-flight checklist passes | Clone repo, install Python, write cli.py, init SQLite | 1-2 hours |
+| 2 | After agent reports Phase 1 done | Verify engine works | 5 min |
+| 3 | After Prompt 2 passes | Discover + classify calendars | 30 min |
+| 4 | After agent shows calendar proposals | Confirm classifications, run first sync | 30 min |
+| 5 | After calendar pipeline works | Wire tasks + financial data from Sheets | 1 hour |
+| 6 | After data is in SQLite | Wire cron jobs + proactive messaging | 1-2 hours |
+| 7 | After test message received on phone | Build scoreboard + console + chat | 2-3 hours |
+| 8 | After surfaces are working | Expand SOUL.md + AGENTS.md with full personality | 1 hour |
+| 9 | After agent files reviewed | Backup, logging, privacy tests, go-live checklist | 1 hour |
+| 10 | After go-live checklist all green | Reboot test | 5 min |
+
+**Total: ~8-12 hours of agent work spread across the prompts, plus ~30 min of your time reviewing/confirming between prompts.**
 
 ---
 

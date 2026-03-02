@@ -1,252 +1,330 @@
-# PIB v5 Bootstrap Readiness — Full Capability Task Plan
+# Bootstrap Readiness Task Plan — PIB v5 on OpenClaw
 
-This plan defines the implementation tasks required to move PIB from current state to production-grade launch readiness on a Mac mini, with full family profiles and connected services.
+**Context:** PIB v5 (chief-40-vermont) runs on OpenClaw as L0 infrastructure. This plan defines what PIB must build vs what OpenClaw already provides. Read alongside:
+- `docs/openclaw-integration.md` — architecture spec (what to keep/replace/build)
+- `MAC_MINI_BOOTSTRAP.md` — technical checklist
+- `MAC_MINI_WALKTHROUGH.md` — step-by-step beginner setup
+
+**Deployment model:** OpenClaw daemon on Mac Mini handles channels, cron, model routing, Google auth (`gog` CLI). PIB is a Python package called via `pib.cli` from OpenClaw scripts. SQLite is the SSOT. No standalone FastAPI server.
+
+---
 
 ## Exit Criteria (Definition of Done)
 
 PIB is launch-ready when all are true:
-- Mac mini bootstrap is reproducible and idempotent for production and staging.
-- OAuth/key onboarding is complete for Anthropic, Google (Console, Gmail, Calendar, Drive), Twilio, BlueBubbles.
-- Inbound + outbound messaging works end-to-end with delivery receipts and retries.
-- Tasks, Calendar, and Finance run as SSOTs with deterministic ingest/sync/reconciliation.
-- Multi-user auth with role-based access and per-member privacy isolation is enforced.
-- Backups, observability, runbooks, and restore drills are operational.
+
+- Mac Mini bootstrap is reproducible per `MAC_MINI_WALKTHROUGH.md`.
+- Credentials wired: Google (`gog auth`), Anthropic (`openclaw config`), BlueBubbles, and at least one messaging channel (Signal/WhatsApp/iMessage).
+- Inbound + outbound messaging works end-to-end via OpenClaw channels.
+- Tasks, Calendar, and Finance SSOTs populated in SQLite with deterministic ingest/sync.
+- Per-member privacy enforced at the read layer (Gene 7 invariant #5).
+- Backups, health checks (HEARTBEAT.md), and restore drill operational.
+- `pytest tests/ -v` all green.
+- All probes from `docs/openclaw-integration.md` §9 pass.
 
 ---
 
-## P0 — Foundation, Security, and Bootstrap Hardening
+## What OpenClaw Handles (not PIB's responsibility)
 
-### T-001: Environment and Secrets Model
-- Define required env vars and secret provenance by service.
-- Add startup validation that fails fast if required secrets are missing in non-dev mode.
-- Add secret-rotation metadata (last rotated, owner, expiry target).
-- Add encrypted-at-rest secret storage guidance for Mac deployment.
-- **DoD:** service refuses startup on missing critical secrets; `/health` reports secrets posture without exposing values.
+These are provided by OpenClaw L0. PIB does not build or manage them:
 
-### T-002: Bootstrap Script Production Mode
-- Extend `scripts/bootstrap.sh` with:
-  - mode flags (`--dev`, `--prod`, `--noninteractive`)
-  - preflight checks (python/node/sqlite versions, disk space, write permissions)
-  - secure file permissions (`.env`, key files, logs, db)
-  - post-bootstrap smoke tests.
-- Add rollback guidance if bootstrap step fails.
-- **DoD:** one-command production bootstrap with deterministic output and failure diagnostics.
-
-### T-003: AuthN/AuthZ Architecture
-- Implement user login (OIDC or managed identity provider).
-- Create user-account table(s), session management, passwordless/2FA policy if needed.
-- Map identity to `common_members` and enforce per-request membership context.
-- Add RBAC (parent, child, admin, viewer, service-account).
-- **DoD:** every `/api/*` request has authenticated principal, role checks, and scoped data access.
-
-### T-004: Webhook Security Hardening
-- Enforce fail-closed signature/secret checks for Twilio/BlueBubbles/Siri/Sheets in production.
-- Add replay-protection windows and nonce/idempotency checks.
-- Add per-source IP allowlist support where feasible.
-- **DoD:** invalid webhook attempts are rejected, audited, and rate-limited.
-
-### T-005: Privacy and PII Guardrails
-- Formalize redaction and privilege fences at read-layer boundaries.
-- Add canary tests to assert privileged data never enters LLM context.
-- Add PII/PHI-safe logging policy and sanitizer middleware.
-- **DoD:** privacy policy enforced by code paths and tests, not prompts.
+| Capability | OpenClaw provides | PIB equivalent dropped |
+|---|---|---|
+| Channel routing | Signal, WhatsApp, iMessage, SMS, webchat | `web.py` webhook endpoints |
+| Google auth | `gog auth login` + automatic token refresh | OAuth flows, token lifecycle |
+| Model routing | Multi-provider LLM, failover, config swap | Direct Anthropic client |
+| Cron engine | Scheduled jobs with heartbeat monitoring | APScheduler |
+| Process management | Gateway daemon, auto-restart | uvicorn process management |
+| Webhook security | Channel-level auth (Twilio signatures, etc.) | `auth.py` middleware |
+| Session management | Agent sessions, conversation history | `mem_sessions` / `mem_messages` |
+| Credential storage | `openclaw config set` | `.env` file management |
 
 ---
 
-## P0 — Core Integrations (Google, Twilio, BlueBubbles, Anthropic)
+## P0 — Foundation & Security
 
-### T-010: Google Cloud Project Setup Automation
-- Define setup checklist/script for APIs:
-  - Gmail API
-  - Calendar API
-  - Drive API
-  - Sheets API
-- Create OAuth consent screen and scopes set (least privilege).
-- Add credential import flow (service account and/or OAuth refresh token storage).
-- **DoD:** documented and script-assisted Google project onboarding reproducible in <30 min.
+### T-001: Startup Validation
+- `pib.cli bootstrap` validates: Python version ≥ 3.12, SQLite with FTS5, `PIB_DB_PATH` writable, required config present.
+- Fails fast with actionable error messages if anything is missing.
+- **DoD:** `pib.cli bootstrap` either succeeds or prints exactly what's wrong and how to fix it.
 
-### T-011: Google OAuth Token Lifecycle
-- Implement OAuth start/callback/refresh/revoke flows.
-- Persist tokens securely, with rotation and revocation support.
-- Add token health endpoint and renewal alerts.
-- **DoD:** tokens auto-refresh; expired/revoked tokens produce actionable diagnostics.
+### T-002: Privacy & PII Guardrails (Gene 7 #5)
+- Read-layer privacy fence enforced: `privacy: full/privileged/redacted` on all calendar events.
+- Laura's work calendar content (`privileged`) never enters LLM context — filtered in `build_calendar_context()`, not in prompts.
+- PII-safe logging: no raw calendar titles, no email bodies, no phone numbers in log output.
+- **Add canary tests:** pytest tests that assert privileged data is absent from assembled context strings.
+- **DoD:** Privacy policy enforced by code paths and verified by tests. Not by prompts.
 
-### T-012: Gmail Adapter (Read + Incremental Sync)
-- Implement initial backfill and incremental sync by history ID/time cursor.
-- Parse metadata/snippets/threads and map to `ops_comms` with idempotency.
-- Add label mapping for triage states.
-- **DoD:** new Gmail messages appear in inbox domain within SLA target.
-
-### T-013: Google Calendar Adapter (Read-Only SSOT Feed)
-- Implement calendar discovery, source classification proposal, and confirmation flow.
-- Add incremental and full resync jobs with cursor checkpointing.
-- Respect privacy tier mapping (`full`, `privileged`, `redacted`).
-- **DoD:** calendar state powers schedule/whatNow with stale detection and degradation behavior.
-
-### T-014: Google Drive Adapter (Reference + Artifact Ingest)
-- Implement folder/file listing, metadata capture, optional text extraction pipeline.
-- Link relevant artifacts to tasks/items/memory entries.
-- Add ACL-aware visibility filtering.
-- **DoD:** Drive docs can be referenced in workflows without violating access boundaries.
-
-### T-015: Twilio Inbound/Outbound Full Delivery
-- Complete outbound send adapter with status callbacks.
-- Persist provider message SID, delivery status, error reason, retry count.
-- Implement retry/backoff and dead-letter handling.
-- **DoD:** reply from console reaches recipient and status is observable in UI and DB.
-
-### T-016: BlueBubbles Inbound/Outbound Full Delivery
-- Implement outbound send via BlueBubbles bridge with ack/status persistence.
-- Add reconnect/error handling if bridge unavailable.
-- **DoD:** iMessage channel parity with Twilio for core comms workflows.
-
-### T-017: Anthropic Reliability and Budget Controls
-- Add model failover policy (primary/fallback IDs), timeout/retry policy.
-- Track token usage and budget alerts at member/domain granularity.
-- Add prompt/context guardrails and truncation observability.
-- **DoD:** controlled LLM spend and graceful fallback on provider issues.
+### T-003: Console Access Control
+- Console (port 3333) serves on LAN only — bind to `0.0.0.0` but no external port forwarding.
+- Optional: simple bearer token for API endpoints (`PIB_CONSOLE_TOKEN` env var, checked if set, skipped if unset).
+- Member identity on console determined by UI selection (not login — household of 4 on local network).
+- **DoD:** Console accessible from any device on home WiFi. Not accessible from internet unless explicitly tunneled.
 
 ---
 
-## P0 — SSOT Completion (Tasks, Calendar, Finance)
+## P0 — Core Data Pipelines
 
-### T-020: Tasks SSOT Determinism Audit
-- Verify all task mutations are append-only or auditable state transitions.
-- Add invariants tests for recurrence, undo, and idempotency.
-- **DoD:** task store behavior deterministic and recoverable.
+### T-010: Calendar Pipeline (priority #1)
+- `scripts/core/calendar_sync.mjs` calls `gog calendar events --json` for each classified source.
+- Raw events written to `cal_raw_events` with idempotency (UNIQUE on source_id + google_event_id).
+- Classification pipeline: `cal_raw_events` → `cal_classified_events` using rules from `common_source_classifications`.
+- Privacy tier applied during classification (full/privileged/redacted per source config).
+- Stale-source detection: track `last_synced` per `cal_sources` row, warn if >30 min stale.
+- Incremental sync every 15 min (OpenClaw cron). Full resync daily at 2 AM.
+- **DoD:** `whatNow()` sees today's calendar events. Morning digest includes schedule. Conflicts detected. `gog` failure degrades gracefully (uses last-known data + warns).
 
-### T-021: Calendar SSOT Completion
-- Ensure all schedule surfaces read from canonical classified events + daily state tables.
-- Add stale-source indicators and “last sync age” telemetry.
-- **DoD:** schedule pages and `whatNow()` remain safe under partial outages.
+### T-011: Gmail → Comms Inbox
+- `scripts/core/gmail_sync.mjs` calls `gog gmail list --json` with incremental cursor.
+- Feeds into `pib.cli comms-ingest` which maps to `ops_comms` with idempotency.
+- Batch window assignment (morning/midday/evening) via deterministic `assign_batch_window()`.
+- Urgency classification: keyword-based (deterministic), not LLM.
+- Extraction pipeline proposes tasks/events from message content (requires approval gate).
+- **DoD:** "Do I need to respond to anyone?" works. Comms batched for ADHD-friendly delivery windows.
 
-### T-022: Finance Source Adapter + Reconciliation
-- Implement finance ingestion connector(s) and normalization pipeline.
-- Add deduping, merchant/category mapping, and human override flow.
-- Add reconciliation states (new/matched/ignored/disputed).
-- **DoD:** finance SSOT supports accurate budget context and transaction querying.
+### T-012: Financial OS Sync
+- `scripts/core/finance_sync.mjs` calls `gog sheets get` on Financial OS spreadsheet.
+- Normalizes into `fin_transactions` + recomputes `fin_budget_snapshot`.
+- Dedup by external_id. Merchant normalization via `fin_merchant_rules`.
+- Sync every 15 min (OpenClaw cron).
+- **DoD:** "Can we afford X?" and "How's the budget?" return real data. Budget alerts fire when `over_threshold = 1`.
 
-### T-023: Cross-Source Extraction to SSOT Workflow
-- Standardize extraction proposals from comms into task/event/transaction proposals.
-- Add confidence thresholds, approval UX, and audit trail.
-- **DoD:** message-derived items enter SSOT only through deterministic approval gates.
+### T-013: Tasks Bidirectional Sync
+- SQLite `ops_tasks` is the SSOT for task state.
+- Read from Google Sheets (Life OS TASKS tab) on initial hydration.
+- Write back task status changes to Sheets for visibility (optional, one-way push).
+- All mutations go through state machine (`can_transition` + guards).
+- Recurring spawn is idempotent (`last_spawned` check prevents duplicates).
+- **DoD:** Tasks created/completed/deferred in PIB appear in Sheets. State machine invariants hold under all test scenarios.
 
----
-
-## P1 — Family Profiles, UX, and Access Separation
-
-### T-030: User Profile Domain Model
-- Add profile preferences: channels, quiet hours, digest mode, coaching style, permissions.
-- Separate identity account from household member entity where appropriate.
-- **DoD:** each family member has a first-class profile with independent settings.
-
-### T-031: Login UX + Session Management
-- Implement login/logout/session timeout/re-auth flows.
-- Add account recovery and admin invitation flows.
-- **DoD:** secure and usable multi-user login lifecycle.
-
-### T-032: View-Level Privacy Enforcement
-- Enforce per-member visibility in APIs and frontend rendering.
-- Add tests for cross-profile data leakage attempts.
-- **DoD:** one member cannot access restricted items of another.
-
-### T-033: Family Console Role Experiences
-- Parent dashboard, child-safe view, optional coparent constraints.
-- Explicit legal/privacy boundary handling for privileged calendars and notes.
-- **DoD:** role-tailored UX aligns to policy and permissions.
+### T-014: Cross-Source Extraction
+- Comms → proposed tasks/events via `extraction.py` worker.
+- Confidence thresholds: ≥0.8 = auto-propose for approval, <0.8 = log only.
+- Approval gate: proposed items enter `mem_approval_queue`, require human yes.
+- Approved items become real `ops_tasks` or `cal_classified_events` rows.
+- **DoD:** "PIB found a dentist appointment in your email — want me to add it?" works end-to-end.
 
 ---
 
-## P1 — Observability, Ops, and Reliability
+## P0 — Messaging & Outbound
 
-### T-040: Structured Logging + Correlation IDs
-- Add request IDs and job IDs across API, scheduler, adapters.
-- Emit machine-parsable events for ingest/sync/send failures.
-- **DoD:** any failure traceable end-to-end in logs.
+### T-020: Outbound Message Delivery
+- OpenClaw handles transport (Signal, WhatsApp, iMessage, SMS).
+- PIB triggers outbound via agent session responses (reactive) and proactive engine (scheduled).
+- Proactive messages respect guardrails: quiet hours, focus mode, in-meeting, daily/hourly limits.
+- Delivery status tracked in `ops_comms` (sent/delivered/failed).
+- **DoD:** Morning digest reaches James via preferred channel at 7:15 AM. Proactive nudges fire correctly. Non-household messages go to approval queue (Gene 4).
 
-### T-041: Health and Status Panel Completion
-- Extend `/health` to include integration-specific checks:
-  - token freshness
-  - last successful sync ages
-  - queue depth + dead-letter counts
-  - DB integrity checks.
-- **DoD:** operator can diagnose degraded state from one panel.
-
-### T-042: Backup/Restore Production Validation
-- Hourly/daily backup verification + checksum catalog.
-- Quarterly restore drill script and runbook.
-- **DoD:** restore success proven, not assumed.
-
-### T-043: Migration and Rollback Safety
-- Add migration prechecks, backup-before-migrate, and rollback docs.
-- **DoD:** schema changes are reversible with tested procedure.
+### T-021: Proactive Engine Wiring
+- 11 triggers from `proactive.py` already defined.
+- Wire trigger output → OpenClaw outbound message delivery.
+- Cooldown tracking via `mem_cos_activity`.
+- **DoD:** Critical conflict alerts, overdue nudges, paralysis detection, budget alerts, and comms batch summaries all fire and deliver at the right times.
 
 ---
 
-## P1 — Deployment and Networking
+## P1 — Surfaces & UX
 
-### T-050: Launchd Service Hardening
-- Ensure launchd config references immutable runtime paths and env.
-- Add automatic restart policy with crash-loop protection.
-- **DoD:** stable daemon behavior on reboot and failures.
+### T-030: Scoreboard (Kitchen TV)
+- `/scoreboard` endpoint serves fullscreen HTML page.
+- Three columns: James vs Laura vs Charlie.
+- Data from `/api/scoreboard-data` (already implemented in c40v).
+- Auto-refresh every 60 seconds. Dark mode. Readable across room.
+- **DoD:** TV at `http://MAC-IP:3333/scoreboard` shows live family scores, streaks, next tasks.
 
-### T-051: Remote Access Security
-- Cloudflare tunnel (or equivalent) with strict access policies.
-- TLS cert automation and domain hardening.
-- **DoD:** remote access without exposing raw service endpoints.
+### T-031: ADHD Stream (James Carousel)
+- `/api/today-stream` already returns structured stream data.
+- Console renders as one-card-at-a-time carousel per build spec §2.1.
+- Endowed progress items ("Woke up ✓", "Opened PIB ✓") pre-filled.
+- Energy state + streak visible. Micro-script prominent.
+- **DoD:** James opens console → sees ONE thing to do, with the first physical action spelled out.
 
-### T-052: CORS/CSRF and API Security Controls
-- Lock `PIB_CORS_ORIGINS` for production origins.
-- Add CSRF defenses if browser sessions are cookie-based.
-- **DoD:** browser attack surface reduced to acceptable baseline.
+### T-032: Role-Tailored Views
+- James: carousel (`view_mode: carousel`). One card, micro-scripts, energy matching.
+- Laura: compressed (`view_mode: compressed`). Brief, decisions-needing-her, what James is handling.
+- Charlie: child (`view_mode: child`). Chore checklist with star rewards.
+- View mode read from `common_members.view_mode` column.
+- **DoD:** Each family member sees an interface designed for them.
 
----
-
-## P2 — Capability Completeness and Quality
-
-### T-060: End-to-End Test Matrix
-- Build E2E tests for all core service integrations (mock + live test mode).
-- Add synthetic fixture datasets for tasks/calendar/finance/comms.
-- **DoD:** CI gate verifies critical flows before release.
-
-### T-061: Performance and Capacity Validation
-- Load test API, scheduler jobs, and ingestion bursts.
-- Define SLOs for message latency, sync freshness, and dashboard load.
-- **DoD:** system meets target performance on Mac mini hardware.
-
-### T-062: Cost Governance
-- Per-service and per-feature monthly spend tracking.
-- Budget alerts and auto-degrade policies when thresholds hit.
-- **DoD:** predictable operating cost envelope.
-
-### T-063: Compliance and Data Retention Policy
-- Define retention windows by domain; implement purge/archival jobs.
-- Add export/delete workflows for household data portability.
-- **DoD:** transparent lifecycle management for all retained data.
+### T-033: Console Chat
+- Chat widget in console sends messages to OpenClaw agent.
+- Agent uses assembled context from `pib.cli context --member {member_id}`.
+- Responses rendered in chat UI with tool action indicators.
+- **DoD:** Chat in console works like messaging PIB from any channel, but with richer UI.
 
 ---
 
-## Suggested Execution Sequence
+## P1 — Reliability & Ops
 
-1. P0 foundation/security (T-001..T-005)
-2. P0 integrations (T-010..T-017)
-3. P0 SSOT completion (T-020..T-023)
-4. P1 profile/auth UX (T-030..T-033)
-5. P1 ops/deployment hardening (T-040..T-052)
-6. P2 quality/completeness (T-060..T-063)
+### T-040: Health Checks (HEARTBEAT.md)
+- `pib.cli health --json` checks:
+  - SQLite readable + writable
+  - `gog calendar list` succeeds (Google auth valid)
+  - Console server responding on port 3333
+  - Last calendar sync age < 30 min
+  - No unresolved critical conflicts
+  - DB size within bounds
+  - Backup freshness
+- OpenClaw heartbeat triggers this and alerts Bossman if anything is `error` or `warn`.
+- **DoD:** HEARTBEAT_OK when healthy. Actionable alert text when not.
+
+### T-041: Backup & Restore
+- Hourly SQLite backup: copy `pib.db` to `backups/pib-YYYY-MM-DDTHH.db`.
+- Daily backup verification: open backup, run `PRAGMA integrity_check`.
+- Retain 7 days of hourly backups, 30 days of daily backups.
+- Restore drill: documented procedure, tested quarterly.
+- **DoD:** `pib.cli backup` creates verified backup. `pib.cli restore --from backups/pib-xxx.db` restores to known state.
+
+### T-042: Migration Safety
+- `meta_migrations` table tracks applied migrations with checksums.
+- Every migration has `up_sql` and `down_sql`.
+- `pib.cli migrate` backs up DB before applying, rolls back on failure.
+- **DoD:** Schema changes are reversible with tested procedure.
+
+### T-043: Structured Logging
+- `pib.cli` commands output JSON to stdout (for OpenClaw to parse).
+- Errors go to stderr with correlation IDs.
+- No PII in logs (calendar titles redacted, phone numbers masked).
+- Log rotation: `/tmp/pib-*.log` files, 10MB max, 5 backups.
+- **DoD:** Any failure traceable. No PII leakage in log files.
 
 ---
 
-## Final Go-Live Checklist
+## P1 — Deployment Hardening
 
-- [ ] Production secrets configured and validated.
-- [ ] OAuths connected and token refresh verified.
-- [ ] Webhooks verified with signature checks and replay protection.
-- [ ] Inbound/outbound messaging tested on Twilio + BlueBubbles.
-- [ ] Google Gmail/Calendar/Drive/Sheets sync running with stale-age telemetry.
-- [ ] Tasks/Calendar/Finance SSOTs validated with sample and real data.
-- [ ] Multi-user login/RBAC/privacy tests passing.
-- [ ] Backups + restore drill completed.
-- [ ] Runbooks complete (on-call, outage, key rotation, disaster recovery).
-- [ ] UAT signoff by each family member profile.
+### T-050: Launchd Auto-Start
+- OpenClaw gateway: `com.openclaw.gateway.plist` with KeepAlive + RunAtLoad.
+- Console server: `com.pib.console.plist` with KeepAlive + RunAtLoad.
+- BlueBubbles: Login Items auto-start.
+- Crash-loop detection: if process restarts >5 times in 10 min, stop and alert.
+- **DoD:** Power cycle Mac Mini → all services running within 60 seconds, no human intervention.
 
+### T-051: Remote Access
+- SSH enabled (System Settings → Sharing → Remote Login).
+- Cloudflare tunnel for external webhook delivery (Twilio, Siri Shortcuts).
+- Tailscale optional for personal SSH access from anywhere.
+- Console NOT exposed externally unless explicitly tunneled.
+- **DoD:** James can SSH from laptop. Twilio webhooks reach Mac Mini. Console is LAN-only by default.
+
+---
+
+## P2 — Quality & Completeness
+
+### T-060: Test Coverage
+- Existing: 20 unit/integration test files (engine, state machine, custody, energy, rewards, streaks, memory, privacy, voice, ingest, web).
+- Add: E2E tests with mock adapters (mock `gog` CLI output, mock OpenClaw channel).
+- Add: Canary tests for privacy (T-002).
+- Add: Invariant tests for all Gene 7 rules.
+- **DoD:** `pytest tests/ -v` covers all critical paths. CI gate optional but recommended.
+
+### T-061: Cost Governance
+- `cost.py` tracks per-model token usage.
+- Monthly spend alert when approaching budget threshold.
+- Auto-degrade: switch to cheaper model tier when 80% of budget consumed.
+- **DoD:** Predictable monthly API spend. Alert before overspend.
+
+### T-062: Data Retention
+- `cleanup_expired` job runs nightly at 3 AM.
+- Retention: idempotency keys 7 days, undo log 24 hours, session facts 72 hours (unless promoted).
+- Audit log: retain 90 days, then archive.
+- `ops_tasks` rows: never deleted (Gene 7 invariant #1).
+- **DoD:** DB doesn't grow unbounded. Historical data preserved per policy.
+
+### T-063: Voice Intelligence Bootstrap
+- Passive — collects corpus samples from approved drafts and direct replies.
+- Requires ~15 samples per scope before synthesis.
+- Weekly profile rebuild (Sunday 3 AM cron job).
+- No action needed at bootstrap — it learns over time.
+- **DoD:** After 2-3 weeks of usage, voice profiles exist and drafts match writing style.
+
+---
+
+## Execution Sequence
+
+```
+Phase 1 — Bootstrap (MAC_MINI_WALKTHROUGH.md)
+  Mac setup → software → OpenClaw → credentials → agent files
+  Time: ~2 hours human, then agent takes over
+
+Phase 2 — Core Build (agent executes autonomously)
+  T-010 Calendar pipeline          ← #1 priority, unlocks whatNow + schedule
+  T-013 Tasks sync                 ← #2, unlocks task management
+  T-001 Startup validation         ← baked into pib.cli bootstrap
+  T-002 Privacy guardrails         ← canary tests
+  T-020 Outbound messaging         ← unlocks proactive delivery
+  T-021 Proactive engine wiring    ← morning digest, nudges
+  Time: 3-4 agent sessions
+
+Phase 3 — Surfaces
+  T-030 Scoreboard                 ← kitchen TV
+  T-031 ADHD Stream                ← James carousel
+  T-032 Role views                 ← Laura/Charlie experiences
+  T-033 Console chat               ← web chat interface
+  Time: 2-3 agent sessions
+
+Phase 4 — Data Completeness
+  T-012 Financial sync             ← budget awareness
+  T-011 Gmail → Comms              ← communication tracking
+  T-014 Cross-source extraction    ← auto-propose tasks from email
+  Time: 2-3 agent sessions
+
+Phase 5 — Hardening
+  T-040 Health checks
+  T-041 Backup/restore
+  T-042 Migration safety
+  T-043 Structured logging
+  T-050 Launchd hardening
+  T-051 Remote access
+  T-003 Console access control
+  Time: 1-2 agent sessions
+
+Phase 6 — Quality
+  T-060 Test coverage
+  T-061 Cost governance
+  T-062 Data retention
+  T-063 Voice intelligence (passive, no build needed)
+  Time: 1-2 agent sessions
+```
+
+**Total estimated: ~15 agent sessions from bootstrap to production-grade.**
+
+---
+
+## Go-Live Checklist
+
+```
+CORE
+[ ] pib.cli bootstrap succeeds
+[ ] pytest tests/ -v all green
+[ ] whatNow() returns task with micro-script
+[ ] Custody math correct for today
+[ ] Calendar pipeline running (cal_classified_events populated)
+
+MESSAGING
+[ ] Inbound message via at least one channel → PIB responds
+[ ] Outbound proactive message delivered (morning digest)
+[ ] Non-household message → approval queue (not sent directly)
+
+DATA
+[ ] Tasks SSOT populated from Life OS Sheets
+[ ] Financial SSOT populated from Financial OS Sheets
+[ ] Calendar SSOT populated from Google Calendar via gog
+[ ] Privacy canary tests passing
+
+SURFACES
+[ ] Console loads at http://MAC-IP:3333/
+[ ] Scoreboard loads at http://MAC-IP:3333/scoreboard
+[ ] Chat works in console
+
+OPS
+[ ] HEARTBEAT.md → HEARTBEAT_OK
+[ ] Backup created and verified
+[ ] Launchd services survive reboot test
+[ ] SSH access works from laptop
+
+FAMILY
+[ ] James: carousel view, whatNow, rewards working
+[ ] Laura: compressed view, decisions queue visible
+[ ] Charlie: chore checklist with stars
+[ ] Kitchen TV: scoreboard displaying
+```

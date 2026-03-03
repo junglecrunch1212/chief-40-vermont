@@ -8,10 +8,12 @@ from pib.voice import (
     _estimate_formality,
     _extract_vocabulary,
     _fallback_style_summary,
+    _is_from_privileged_domain,
     collect_voice_sample,
     get_corpus_stats,
     get_profiles,
     resolve_voice_profile,
+    PRIVILEGED_DOMAINS,
 )
 
 
@@ -179,3 +181,66 @@ class TestProfileResolution:
         assert len(profiles) == 2
         # Should be sorted by scope_level DESC
         assert profiles[0]["scope_level"] >= profiles[1]["scope_level"]
+
+
+# ═══════════════════════════════════════════════════════════
+# Privacy Filter
+# ═══════════════════════════════════════════════════════════
+
+class TestPrivacyFilter:
+    def test_privileged_domain_detected(self):
+        assert _is_from_privileged_domain("user@evolvefamilylawga.com")
+
+    def test_privileged_domain_in_labels(self):
+        assert _is_from_privileged_domain(None, {"comm_type": "email@evolve.law"})
+
+    def test_non_privileged_domain_passes(self):
+        assert not _is_from_privileged_domain("user@gmail.com")
+
+    def test_none_inputs(self):
+        assert not _is_from_privileged_domain(None, None)
+
+    async def test_privileged_domain_not_stored(self, db):
+        """Message from privileged domain should NOT be stored in corpus."""
+        sample_id = await collect_voice_sample(
+            db,
+            member_id="m-laura",
+            body="Please review the custody agreement",
+            channel="email",
+            item_ref="contact@evolvefamilylawga.com",
+        )
+        assert sample_id == ""  # Should return empty string
+
+        # Verify nothing was stored
+        rows = await db.execute_fetchall(
+            "SELECT * FROM cos_voice_corpus WHERE member_id = 'm-laura'"
+        )
+        assert len(rows) == 0
+
+
+# ═══════════════════════════════════════════════════════════
+# Client Creation (Lazy Singleton)
+# ═══════════════════════════════════════════════════════════
+
+class TestClientCreation:
+    def test_no_per_call_client_instantiation(self):
+        """Verify voice.py uses module-level lazy singleton, not per-call creation."""
+        import ast
+        from pathlib import Path
+        voice_path = Path(__file__).parent.parent / "src" / "pib" / "voice.py"
+        source = voice_path.read_text()
+        tree = ast.parse(source)
+
+        # Look for AsyncAnthropic calls inside function bodies
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef)):
+                if node.name == "_get_anthropic_client":
+                    continue  # Skip the singleton factory itself
+                for child in ast.walk(node):
+                    if isinstance(child, ast.Call):
+                        func = child.func
+                        if isinstance(func, ast.Attribute) and func.attr == "AsyncAnthropic":
+                            pytest.fail(
+                                f"Found per-call AsyncAnthropic() in function {node.name} "
+                                f"at line {child.lineno}"
+                            )

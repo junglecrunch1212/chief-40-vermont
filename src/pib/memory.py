@@ -19,6 +19,22 @@ NEGATION_TOKENS = {
 }
 
 
+def _basic_stem(word: str) -> str:
+    """Strip common English suffixes for rough word normalization."""
+    if word.endswith("ing") and len(word) > 5:
+        return word[:-3]
+    if word.endswith("ed") and len(word) > 4:
+        return word[:-2]
+    # Only strip "es" for true -es plurals (watches, dishes, foxes, buzzes)
+    if word.endswith("es") and len(word) > 4:
+        base = word[:-2]
+        if base.endswith(("ch", "sh", "s", "x", "z")):
+            return base
+    if word.endswith("s") and len(word) > 3 and not word.endswith("ss"):
+        return word[:-1]
+    return word
+
+
 def is_negation_of(new_content: str, existing_content: str) -> bool:
     """Detect when new fact negates existing. 'James doesn't like sushi' vs 'James likes sushi'."""
     new_lower, existing_lower = new_content.lower(), existing_content.lower()
@@ -37,9 +53,11 @@ def is_negation_of(new_content: str, existing_content: str) -> bool:
     existing_negs = set(existing_words) & NEGATION_TOKENS
 
     if bool(new_negs) != bool(existing_negs):
-        new_filtered = set(w for w in new_words if w not in NEGATION_TOKENS)
-        existing_filtered = set(w for w in existing_words if w not in NEGATION_TOKENS)
-        overlap = len(new_filtered & existing_filtered) / max(len(new_filtered | existing_filtered), 1)
+        new_filtered = set(_basic_stem(w) for w in new_words if w not in NEGATION_TOKENS)
+        existing_filtered = set(_basic_stem(w) for w in existing_words if w not in NEGATION_TOKENS)
+        # Use the smaller set as denominator so extra context words don't dilute the match
+        min_len = min(len(new_filtered), len(existing_filtered))
+        overlap = len(new_filtered & existing_filtered) / max(min_len, 1)
         if overlap >= 0.5:
             return True
 
@@ -156,12 +174,20 @@ async def auto_promote_session_facts(db) -> dict:
             if keyword in content_lower:
                 confidence = min(confidence + 0.1, 1.0)
 
-        similar_count = await db.execute_fetchone(
-            "SELECT COUNT(*) as c FROM mem_session_facts "
-            "WHERE fact_type = ? AND content LIKE ? AND id != ?",
-            [fact["fact_type"], f"%{fact['content'][:30]}%", fact["id"]],
+        # Check for similar facts using SequenceMatcher instead of LIKE
+        # (avoids false positives on short content)
+        from difflib import SequenceMatcher
+        similar_rows = await db.execute_fetchall(
+            "SELECT content FROM mem_session_facts "
+            "WHERE fact_type = ? AND id != ?",
+            [fact["fact_type"], fact["id"]],
         )
-        if similar_count and similar_count["c"] >= 1:
+        similar_found = 0
+        for sr in (similar_rows or []):
+            ratio = SequenceMatcher(None, fact["content"].lower(), sr["content"].lower()).ratio()
+            if ratio >= 0.6:
+                similar_found += 1
+        if similar_found >= 1:
             confidence = min(confidence + 0.15, 1.0)
 
         if confidence >= min_confidence:

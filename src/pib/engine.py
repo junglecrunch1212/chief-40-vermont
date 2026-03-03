@@ -5,6 +5,8 @@ import logging
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 
+from pib.tz import now_et
+
 log = logging.getLogger(__name__)
 
 
@@ -28,7 +30,7 @@ class DBSnapshot:
     members: dict  # {member_id: member_dict}
     streaks: dict  # {member_id: streak_dict}
     calendar_events: list[dict] = field(default_factory=list)
-    now: datetime = field(default_factory=datetime.now)
+    now: datetime = field(default_factory=now_et)
 
 
 # ─── Task State Machine ───
@@ -110,7 +112,7 @@ def compute_energy_level(energy_state: dict | None, member: dict, now: datetime 
     if not energy_state:
         return "medium"
 
-    now = now or datetime.now()
+    now = now or now_et()
     current_hour = now.hour
 
     sleep = energy_state.get("sleep_quality", "okay")
@@ -300,12 +302,14 @@ def what_now(member_id: str, snapshot: DBSnapshot) -> WhatNowResult:
     calendar_status = None
     for event in snapshot.calendar_events:
         if event.get("scheduling_impact") == "HARD_BLOCK":
-            event_start = event.get("start_time", "")
-            event_end = event.get("end_time", "")
+            event_start = event.get("start_time") or ""
+            event_end = event.get("end_time") or ""
             try:
+                if not event_start or not event_end:
+                    continue
                 s = datetime.fromisoformat(event_start) if "T" in event_start else datetime.strptime(event_start, "%H:%M").replace(year=today.year, month=today.month, day=today.day)
                 e = datetime.fromisoformat(event_end) if "T" in event_end else datetime.strptime(event_end, "%H:%M").replace(year=today.year, month=today.month, day=today.day)
-                if s <= now <= e:
+                if s <= now.replace(tzinfo=None) <= e:
                     calendar_status = f"In: {event.get('title', 'event')} until {event_end}"
                     break
             except (ValueError, TypeError):
@@ -347,7 +351,7 @@ def what_now(member_id: str, snapshot: DBSnapshot) -> WhatNowResult:
             -is_overdue,  # Overdue first (negative = earlier)
             days_until_due,  # Sooner due dates next
             status_order.get(t.get("status", "inbox"), 5),
-            effort_order.get(t.get("effort", "medium"), 2),
+            effort_order.get(t.get("effort") or "unknown", 2),
             t.get("created_at", ""),
         )
 

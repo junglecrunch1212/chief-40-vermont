@@ -1,0 +1,64 @@
+# governance.yaml — Action-level governance gates
+#
+# Gates control what happens when an agent invokes a CLI write command.
+#   true     = auto-approve (no confirmation needed)
+#   confirm  = queue for user confirmation before executing
+#   off      = blocked entirely for this action
+#
+version: "1.0"
+updated: "2026-03-03"
+
+# ═══════════════════════════════════════════════════════════
+# ACTION GATES
+# ═══════════════════════════════════════════════════════════
+
+action_gates:
+  task_create: true
+  task_complete: true
+  task_update: confirm
+  task_snooze: confirm
+  calendar_hold_create: confirm
+  calendar_hold_confirm: confirm
+  calendar_hold_reject: confirm
+  recurring_mark_done: true
+  recurring_mark_skip: true
+  state_update: true           # Meds, sleep, energy — always auto-approve
+  capture_create: true
+  webhook_receive: true        # Inbound messages always processed
+  run_proactive_checks: true   # Cron-triggered, always auto-approve
+
+# Agent-specific overrides (merged on top of defaults above)
+agent_overrides:
+  coach:
+    task_create: off           # Coach doesn't create tasks
+    calendar_hold_create: off  # Coach doesn't touch calendar
+  scoreboard:
+    task_create: off
+    task_complete: off
+    task_update: off
+    calendar_hold_create: off
+  proactive:
+    task_create: off
+    task_update: off
+
+# ═══════════════════════════════════════════════════════════
+# RATE LIMITS
+# ═══════════════════════════════════════════════════════════
+
+rate_limits:
+  writes_per_minute: 3
+  alert_threshold: 3           # Alert Bossman after this many writes in 60s
+
+# ═══════════════════════════════════════════════════════════
+# OUTPUT SANITIZATION
+# ═══════════════════════════════════════════════════════════
+
+output_sanitization:
+  strip_patterns:
+    - "sk-ant-[a-zA-Z0-9_-]+"          # Anthropic API keys
+    - "ANTHROPIC_API_KEY=[^\\s]+"       # Env var leaks
+    - "claude-[0-9]+-[0-9]+-[0-9]+"    # Model IDs (prevent version leak)
+  redact_for_non_dev:
+    - laura_work_calendar_titles         # Privacy fence: Gene 4
+    - api_key_values
+    - model_identifiers

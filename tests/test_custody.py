@@ -143,6 +143,36 @@ class TestEdgeCases:
         result = who_has_child(date(2026, 1, 4), alt_week_config)
         assert result in ("m-james", "m-laura-ex")
 
+    def test_malformed_json_returns_default(self, alt_week_config):
+        """Malformed holiday_overrides JSON should not crash — returns default parent."""
+        alt_week_config["holiday_overrides"] = "not valid json{"
+        result = who_has_child(date(2026, 1, 5), alt_week_config)
+        assert result in ("m-james", "m-laura-ex")
+
+    def test_single_date_format_holiday(self, alt_week_config):
+        """Single-date override format {date: '...'} should work."""
+        alt_week_config["holiday_overrides"] = json.dumps([
+            {"date": "2026-12-25", "parent": "m-laura-ex"}
+        ])
+        assert who_has_child(date(2026, 12, 25), alt_week_config) == "m-laura-ex"
+
+    def test_midweek_thursday_transition(self):
+        """Thursday midweek visit config works correctly."""
+        config = {
+            "schedule_type": "alternating_weekends_midweek",
+            "anchor_date": "2026-01-05",
+            "anchor_parent": "m-james",
+            "other_parent": "m-laura-ex",
+            "midweek_visit_enabled": True,
+            "midweek_visit_day": "thursday",
+            "midweek_visit_parent": "m-laura-ex",
+            "holiday_overrides": "[]",
+        }
+        # Thursday Jan 8 → midweek visit
+        assert who_has_child(date(2026, 1, 8), config) == "m-laura-ex"
+        # Wednesday Jan 7 → anchor parent (not midweek day)
+        assert who_has_child(date(2026, 1, 7), config) == "m-james"
+
     def test_primary_with_visitation_defaults(self):
         config = {
             "schedule_type": "primary_with_visitation",

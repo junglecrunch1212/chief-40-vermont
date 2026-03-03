@@ -18,6 +18,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from pib.auth import auth_middleware, validate_bluebubbles_secret, validate_siri_token, validate_twilio_signature
+from pib.tz import now_et
 from pib.bootstrap_wizard import upsert_env_value, wizard_state
 from pib.db import apply_migrations, apply_schema, get_config, get_connection, next_id, set_config
 from pib.engine import (
@@ -135,6 +136,22 @@ static_dir = os.path.join(os.path.dirname(__file__), "..", "..", "static")
 if os.path.isdir(static_dir):
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
+
+# ═══════════════════════════════════════════════════════════════
+# PIB_CALLER_AGENT WIRING
+# ═══════════════════════════════════════════════════════════════
+#
+# Under OpenClaw, agents do NOT call web.py routes directly.
+# Instead, they invoke cli.py commands with PIB_CALLER_AGENT set.
+# web.py remains the human-facing HTTP interface.
+#
+# When web routes invoke CLI-equivalent operations internally,
+# they run with agent="web" context (no CLI permission enforcement
+# since the web layer has its own auth middleware).
+#
+# The actual permission enforcement happens in cli.py.
+# See config/agent_capabilities.yaml for the agent→command matrix.
+# ═══════════════════════════════════════════════════════════════
 
 # ═══════════════════════════════════════════════════════════════
 # HEALTH
@@ -618,7 +635,7 @@ async def chat_endpoint(request: Request):
         from pib.ingest import IngestEvent, route_prefix
         event = IngestEvent(
             source="web_chat",
-            timestamp=datetime.now().isoformat(),
+            timestamp=now_et().isoformat(),
             idempotency_key="",
             raw={},
             text=message,
@@ -783,7 +800,7 @@ async def twilio_webhook(request: Request):
 
     event = IngestEvent(
         source="twilio",
-        timestamp=datetime.now().isoformat(),
+        timestamp=now_et().isoformat(),
         idempotency_key=make_idempotency_key("sms", form.get("MessageSid", "")),
         raw=dict(form),
         text=form.get("Body", ""),
@@ -807,7 +824,7 @@ async def bluebubbles_webhook(request: Request):
 
     event = IngestEvent(
         source="imessage",
-        timestamp=datetime.now().isoformat(),
+        timestamp=now_et().isoformat(),
         idempotency_key=make_idempotency_key("imessage", body.get("guid", "")),
         raw=body,
         text=body.get("text", ""),
@@ -831,7 +848,7 @@ async def siri_webhook(request: Request):
 
     event = IngestEvent(
         source="siri",
-        timestamp=datetime.now().isoformat(),
+        timestamp=now_et().isoformat(),
         idempotency_key=make_idempotency_key("siri", f"{body.get('ts', '')}:{body.get('text', '')}"),
         raw=body,
         text=body.get("text", ""),
@@ -960,7 +977,7 @@ async def today_stream(member_id: str = "m-james"):
     stream.append({"id": "endowed-2", "type": "endowed", "title": "Opened PIB", "label": "Opened PIB", "state": "done"})
 
     # Calendar events
-    now_str = datetime.now().strftime("%H:%M")
+    now_str = now_et().strftime("%H:%M")
     for i, evt in enumerate(cal_events or []):
         evt_title = evt["title"] if evt["privacy"] == "full" else (evt.get("title_redacted") or "[unavailable]")
         start = evt.get("start_time", "")

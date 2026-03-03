@@ -185,6 +185,40 @@ class TestDeterministicFallback:
         assert "offline" in result.lower() or "basic mode" in result.lower()
 
 
+class TestUndoRestoreData:
+    async def test_undo_uses_restore_data(self, db):
+        """Verify _tool_undo_last reads restore_data column, not undo_sql."""
+        from pib.llm import _tool_undo_last
+
+        # Insert an undo log entry with restore_data (explicit timestamps to avoid strftime index issue)
+        await db.execute(
+            "INSERT INTO common_undo_log (operation, table_name, entity_id, actor, restore_data, created_at, expires_at) "
+            "VALUES ('UPDATE', 'ops_tasks', 'tsk-00001', 'm-james', "
+            "\"UPDATE ops_tasks SET status='next' WHERE id='tsk-00001'\", "
+            "'2026-03-03T00:00:00Z', '2099-12-31T23:59:59Z')",
+        )
+        await db.commit()
+
+        result = await _tool_undo_last(db, "m-james")
+        assert "undone" in result
+        assert "error" not in result
+
+    async def test_undo_no_restore_data(self, db):
+        """Verify error when restore_data is NULL."""
+        from pib.llm import _tool_undo_last
+
+        await db.execute(
+            "INSERT INTO common_undo_log (operation, table_name, entity_id, actor, restore_data, created_at, expires_at) "
+            "VALUES ('UPDATE', 'ops_tasks', 'tsk-00001', 'm-james', NULL, "
+            "'2026-03-03T00:00:00Z', '2099-12-31T23:59:59Z')",
+        )
+        await db.commit()
+
+        result = await _tool_undo_last(db, "m-james")
+        assert "error" in result
+        assert "restore data" in result["error"].lower()
+
+
 class TestContextAssembly:
     async def test_assembles_dashboard(self, db):
         ctx = await assemble_context(db, "m-james", "hello")

@@ -4,6 +4,8 @@ import json
 import logging
 from datetime import datetime, time
 
+from pib.tz import now_et
+
 log = logging.getLogger(__name__)
 
 # ─── Guardrails ───
@@ -18,19 +20,38 @@ GUARDRAILS = {
 
 async def can_send_proactive(db, member_id: str, now: datetime | None = None) -> tuple[bool, str]:
     """Check all guardrails before sending a proactive message."""
-    now = now or datetime.now()
+    now = now or now_et()
 
     # Quiet hours
     if GUARDRAILS["quiet_hours_start"] <= now.time() or now.time() < GUARDRAILS["quiet_hours_end"]:
         return False, "quiet_hours"
 
-    # Focus mode
+    # Focus mode (auto-expire after 2 hours)
     energy = await db.execute_fetchone(
-        "SELECT focus_mode FROM pib_energy_states WHERE member_id = ? AND state_date = date('now')",
+        "SELECT focus_mode, updated_at FROM pib_energy_states WHERE member_id = ? AND state_date = date('now')",
         [member_id],
     )
     if energy and energy["focus_mode"]:
-        return False, "focus_mode"
+        if energy.get("updated_at"):
+            try:
+                updated = datetime.fromisoformat(energy["updated_at"].replace("Z", "+00:00"))
+                updated_naive = updated.replace(tzinfo=None)
+                now_naive = now.replace(tzinfo=None) if now.tzinfo else now
+                hours_elapsed = (now_naive - updated_naive).total_seconds() / 3600
+                if hours_elapsed > 2:
+                    await db.execute(
+                        "UPDATE pib_energy_states SET focus_mode = 0, updated_at = datetime('now') "
+                        "WHERE member_id = ? AND state_date = date('now')",
+                        [member_id],
+                    )
+                    await db.commit()
+                    log.info(f"Auto-expired focus mode for {member_id} after {hours_elapsed:.1f}h")
+                else:
+                    return False, "focus_mode"
+            except (ValueError, TypeError):
+                return False, "focus_mode"
+        else:
+            return False, "focus_mode"
 
     # In-meeting check
     cal = await db.execute_fetchone(
@@ -41,20 +62,24 @@ async def can_send_proactive(db, member_id: str, now: datetime | None = None) ->
     if cal:
         return False, "in_meeting"
 
-    # Daily limit
+    # Daily limit (per-member)
     daily_count = await db.execute_fetchone(
         "SELECT COUNT(*) as c FROM mem_cos_activity "
         "WHERE action_type = 'proactive_message' AND actor = 'proactive' "
+        "AND description LIKE ? "
         "AND created_at >= datetime('now', 'start of day')",
+        [f"%for {member_id}%"],
     )
     if daily_count and daily_count["c"] >= GUARDRAILS["max_proactive_per_day"]:
         return False, "daily_limit"
 
-    # Hourly limit
+    # Hourly limit (per-member)
     hourly_count = await db.execute_fetchone(
         "SELECT COUNT(*) as c FROM mem_cos_activity "
         "WHERE action_type = 'proactive_message' AND actor = 'proactive' "
+        "AND description LIKE ? "
         "AND created_at >= datetime('now', '-1 hour')",
+        [f"%for {member_id}%"],
     )
     if hourly_count and hourly_count["c"] >= GUARDRAILS["max_proactive_per_hour"]:
         return False, "hourly_limit"
@@ -93,7 +118,13 @@ PROACTIVE_TRIGGERS = [
         "name": "paralysis_detection",
         "priority": 4,
         "cooldown_minutes": 180,
-        "description": "2h silence during peak hours with no calendar block",
+        "description": "3+ tasks in next status, none completed in 2+ hours, energy not crashed",
+        "query": (
+            "SELECT COUNT(*) as c FROM ops_tasks "
+            "WHERE status = 'next' AND assignee = (SELECT id FROM common_members WHERE role='parent' LIMIT 1) "
+            "AND id NOT IN (SELECT id FROM ops_tasks WHERE status='done' AND completed_at >= datetime('now', '-2 hours'))"
+        ),
+        "min_count": 3,
     },
     {
         "name": "post_meeting_capture",
@@ -383,7 +414,7 @@ SENSOR_TRIGGERS = [
 async def scan_triggers(db, member_id: str) -> list[dict]:
     """Scan all proactive triggers (core + sensor) and return those that fired."""
     fired = []
-    now = datetime.now()
+    now = now_et()
 
     can_send, reason = await can_send_proactive(db, member_id, now)
     if not can_send:
@@ -419,10 +450,12 @@ async def scan_triggers(db, member_id: str) -> list[dict]:
         if "query" in trigger:
             result = await db.execute_fetchone(trigger["query"])
             if result:
-                # For COUNT queries, only fire if count > 0
-                if "c" in dict(result) and result["c"] == 0:
+                result_dict = dict(result)
+                min_count = trigger.get("min_count", 1)
+                # For COUNT queries, check against min_count threshold
+                if "c" in result_dict and result_dict["c"] < min_count:
                     continue
-                fired.append({"trigger": trigger["name"], "data": dict(result)})
+                fired.append({"trigger": trigger["name"], "data": result_dict})
 
     # ── Sensor triggers ──
     fired.extend(await _scan_sensor_triggers(db, member_id, now))
@@ -601,7 +634,7 @@ async def build_morning_digest_data(db, member_id: str) -> dict:
     from pib.engine import load_snapshot, what_now
     from pib.custody import who_has_child
 
-    today = datetime.now().date()
+    today = now_et().date()
 
     # whatNow for top tasks
     snapshot = await load_snapshot(db, member_id)

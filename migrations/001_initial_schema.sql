@@ -183,7 +183,7 @@ CREATE TABLE IF NOT EXISTS common_undo_log (
     expires_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now', '+24 hours'))
 );
 CREATE INDEX idx_undo_recent ON common_undo_log(created_at DESC)
-    WHERE undone = 0 AND expires_at > strftime('%Y-%m-%dT%H:%M:%SZ','now');
+    WHERE undone = 0;
 
 -- ═══════════════════════════════════════════════════════════════
 -- ops_* — Operations: tasks, goals, items, recurring, comms, lists

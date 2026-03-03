@@ -4,6 +4,8 @@ import json
 from datetime import date, datetime
 from pathlib import Path
 
+from pib.tz import now_et
+
 import pytest
 import pytest_asyncio
 import aiosqlite
@@ -144,11 +146,11 @@ def snapshot():
         tasks=tasks,
         daily_state=None,
         energy_state={"completions_today": 2, "sleep_quality": "okay", "meds_taken": True,
-                       "meds_taken_at": datetime.now().isoformat()},
+                       "meds_taken_at": now_et().isoformat()},
         members=members,
         streaks={"m-james": {"current_streak": 5, "best_streak": 12}},
         calendar_events=[],
-        now=datetime.now(),
+        now=now_et(),
     )
 
 

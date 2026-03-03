@@ -1,0 +1,231 @@
+# agent_capabilities.yaml — Permission Boundaries per Agent Role
+#
+# Principle: Operational agents interact ONLY through pib.cli commands.
+# No raw exec, no file writes, no direct SQL. The CLI is the permission boundary.
+#
+# OpenClaw capabilities reference:
+#   none     = no exec, no file read/write (safest — forces CLI-only)
+#   tools    = can call defined tools but no raw exec
+#   full     = unrestricted (dev/admin only)
+#
+version: "2.0"
+updated: "2026-03-03"
+
+# ═══════════════════════════════════════════════════════════
+# AGENT DEFINITIONS
+# ═══════════════════════════════════════════════════════════
+
+agents:
+
+  # ─── Chief of Staff (CoS) ────────────────────────────────
+  # Moves the household day forward. Reads everything, writes through CLI.
+  cos:
+    display_name: "PIB — Chief of Staff"
+    capabilities: none          # No exec, no file write
+    model: anthropic/claude-sonnet-4-5
+    channels:
+      - imessage
+      - webchat
+      - signal
+    allowed_cli_commands:
+      # Reads (always safe)
+      - "what-now"              # Next task for member
+      - "calendar-query"        # Calendar availability/events
+      - "custody"               # Who has Charlie
+      - "budget"                # Financial snapshot
+      - "search"                # FTS5 memory/task search
+      - "morning-digest"        # Assemble morning brief
+      - "health"                # System health check
+      - "streak"                # Recurring task streaks
+      - "upcoming"              # Upcoming recurring tasks
+      # Writes (governance-gated)
+      - "task-create"           # → governance: task_create (true)
+      - "task-complete"         # → governance: task_complete (true)
+      - "task-update"           # → governance: task_update (confirm)
+      - "task-snooze"           # → governance: task_update (confirm)
+      - "hold-create"           # → governance: calendar_hold_create (confirm)
+      - "hold-confirm"          # → governance: calendar_hold_confirm (confirm)
+      - "hold-reject"           # → governance: calendar_hold_create (confirm)
+      - "recurring-done"        # → governance: recurring_mark_done (true)
+      - "recurring-skip"        # → governance: recurring_mark_done (true)
+      - "state-update"          # Record meds taken, sleep quality, energy
+      - "capture"               # Quick capture to inbox
+    blocked_cli_commands:
+      - "migrate"               # Schema changes
+      - "bootstrap"             # System init
+      - "backup"                # Ops-only
+      - "fts5-rebuild"          # Maintenance
+      - "seed"                  # Data seeding
+    filesystem: read-only       # Can read SOUL.md, AGENTS.md etc. Never write.
+    sql: none                   # No direct SQL. Everything through CLI.
+    privacy:
+      laura_work_calendar: busy_only
+      financial_detail: household_only  # Never in group chats
+
+  # ─── Coach ───────────────────────────────────────────────
+  # ADHD coaching, streak encouragement, energy management.
+  # Read-only except for state updates (meds, sleep, energy).
+  coach:
+    display_name: "PIB — Coach"
+    capabilities: none
+    model: anthropic/claude-sonnet-4-5
+    channels:
+      - imessage
+      - webchat
+    allowed_cli_commands:
+      # Reads
+      - "what-now"
+      - "streak"
+      - "upcoming"
+      - "search"
+      - "health"
+      # Writes (minimal — coaching only)
+      - "state-update"          # Meds, sleep, energy, focus mode
+      - "task-complete"         # "I did it!" flow
+      - "recurring-done"        # Mark recurring complete
+      - "recurring-skip"        # Skip with reason
+    blocked_cli_commands:
+      - "task-create"           # Coach doesn't create tasks
+      - "hold-create"           # Coach doesn't touch calendar
+      - "budget"                # Coach doesn't discuss money
+      - "migrate"
+      - "bootstrap"
+      - "backup"
+      - "fts5-rebuild"
+      - "seed"
+    filesystem: read-only
+    sql: none
+    privacy:
+      laura_work_calendar: busy_only
+      financial_detail: none    # Coach never sees financial data
+
+  # ─── Scoreboard ──────────────────────────────────────────
+  # Kitchen TV / tablet display. Strictly read-only data feed.
+  scoreboard:
+    display_name: "PIB — Scoreboard"
+    capabilities: none
+    model: none                 # No LLM — pure data render
+    channels:
+      - http                    # Console endpoint only
+    allowed_cli_commands:
+      - "scoreboard-data"       # Scores, streaks, daily stats
+      - "custody"               # Who has Charlie (display)
+      - "streak"                # Streak data for display
+    blocked_cli_commands: "*"   # Everything not explicitly allowed
+    filesystem: none
+    sql: none
+
+  # ─── DevOps / Builder ───────────────────────────────────
+  # Admin agent. Full access. Only available in webchat, never
+  # exposed to family messaging channels.
+  dev:
+    display_name: "Poopsy-Dev"
+    capabilities: full          # Unrestricted
+    model: anthropic/claude-opus-4-6
+    channels:
+      - webchat                 # NEVER on iMessage/Signal/WhatsApp
+    allowed_cli_commands: "*"   # All commands
+    filesystem: full            # Read + write
+    sql: full                   # Direct DB access for debugging
+    restrictions:
+      - "Never auto-deploy to production without GATED approval"
+      - "Never message Laura or family groups"
+      - "Never modify governance.yaml without Bossman approval"
+
+  # ─── Proactive Engine ───────────────────────────────────
+  # Cron-triggered. Scans for triggers, sends nudges.
+  # No interactive session — fire-and-forget.
+  proactive:
+    display_name: "PIB — Proactive"
+    capabilities: none
+    model: none                 # Deterministic — no LLM
+    channels:
+      - cron                    # Triggered by OpenClaw cron only
+    allowed_cli_commands:
+      - "run-proactive-checks"  # Scan triggers
+      - "what-now"              # For message content
+      - "custody"               # For context
+      - "calendar-query"        # For in-meeting detection
+    blocked_cli_commands: "*"
+    filesystem: none
+    sql: none
+    rate_limits:
+      max_messages_per_hour: 2
+      max_messages_per_day: 5
+      quiet_hours: "22:00-07:00"
+
+# ═══════════════════════════════════════════════════════════
+# ENFORCEMENT MODEL
+# ═══════════════════════════════════════════════════════════
+
+enforcement:
+  # How agent capabilities are enforced
+  layers:
+    1_openclaw_capabilities:
+      description: "OpenClaw capabilities flag (none/tools/full)"
+      enforcement: "runtime"
+      notes: "Set in openclaw.json per agent. Prevents exec/file access at framework level."
+
+    2_cli_allowlist:
+      description: "Which pib.cli commands each agent can call"
+      enforcement: "cli.py entrypoint"
+      notes: |
+        cli.py checks caller identity (agent ID from env var PIB_CALLER_AGENT)
+        against this config. Unauthorized commands return {"error": "forbidden", 
+        "agent": "cos", "command": "migrate"} and log to audit trail.
+
+    3_governance_gates:
+      description: "Action-level confirm/off gates from governance.yaml"
+      enforcement: "cli.py write handlers"
+      notes: |
+        Even if an agent is allowed to call task-create, governance.yaml
+        may require user confirmation. The CLI returns {"status": "pending_approval"}
+        and the confirmation flow runs through the user's channel.
+
+    4_sql_guard:
+      description: "No direct SQL access for operational agents"
+      enforcement: "openclaw capabilities: none"
+      notes: |
+        With capabilities=none, agents cannot run exec() at all.
+        No subprocess, no sqlite3 shell, no Python eval.
+        All DB interaction is mediated by cli.py.
+
+    5_filesystem_guard:
+      description: "No file writes for operational agents"
+      enforcement: "openclaw capabilities: none"
+      notes: |
+        With capabilities=none, agents cannot use file write tools.
+        They can read workspace .md files (SOUL, AGENTS, USER) but
+        never modify them. Config files (.yaml, .json) are immutable
+        from operational agent perspective.
+
+    6_audit_trail:
+      description: "Every agent action logged"
+      enforcement: "cli.py + ops_ledger"
+      notes: |
+        cli.py logs every invocation: {agent, command, args, result, timestamp}
+        to both ops_ledger (append-only JSONL) and mem_cos_activity (SQLite).
+        Anomaly detection: if an agent calls >3 write commands in 60 seconds,
+        auto-pause and alert Bossman.
+
+# ═══════════════════════════════════════════════════════════
+# CHANNEL → AGENT ROUTING
+# ═══════════════════════════════════════════════════════════
+
+routing:
+  # Which agent handles messages from each channel
+  imessage:
+    default: cos
+    keywords:
+      "coach": coach            # "hey coach, how's my streak?"
+      "dev": dev                # blocked — dev not on iMessage
+  webchat:
+    default: cos
+    tabs:
+      dashboard: cos
+      admin: dev
+      scoreboard: scoreboard
+  signal:
+    default: cos
+  cron:
+    default: proactive

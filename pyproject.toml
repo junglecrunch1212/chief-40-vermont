@@ -25,6 +25,10 @@ dependencies = [
 pib = "pib.cli:main"
 
 [project.optional-dependencies]
+google = [
+    "google-api-python-client>=2.100",
+    "google-auth>=2.23",
+]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",

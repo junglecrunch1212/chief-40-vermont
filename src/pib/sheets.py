@@ -45,13 +45,30 @@ async def push_to_sheets(db) -> dict:
 
             rows = await db.execute_fetchall(query)
             data = [dict(r) for r in rows] if rows else []
-            results[sheet_name] = {"rows": len(data), "status": "ready"}
-            # Actual Google Sheets API call would go here
+
+            # Push to Google Sheets via adapter
+            from pib.adapters import get_adapter
+            sheets_adapter = get_adapter("google_sheets")
+            if sheets_adapter:
+                sheet_id = await _get_sheet_id(db)
+                if sheet_id:
+                    push_result = await sheets_adapter.push(db, sheet_id, sheet_name, config["columns"], data)
+                    results[sheet_name] = {"rows": len(data), "status": "pushed" if push_result.get("ok") else "push_failed"}
+                else:
+                    results[sheet_name] = {"rows": len(data), "status": "ready", "note": "no sheet_id configured"}
+            else:
+                results[sheet_name] = {"rows": len(data), "status": "ready"}
         except Exception as e:
             log.error(f"Sheets push failed for {sheet_name}: {e}")
             results[sheet_name] = {"rows": 0, "status": "error", "error": str(e)}
 
     return results
+
+
+async def _get_sheet_id(db) -> str | None:
+    """Get the Google Sheets spreadsheet ID from pib_config."""
+    from pib.db import get_config
+    return await get_config(db, "google_sheets_spreadsheet_id")
 
 
 async def handle_sheets_webhook(db, payload: dict) -> dict:

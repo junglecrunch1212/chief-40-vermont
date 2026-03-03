@@ -44,9 +44,13 @@ async def test_morning_digest_iterates_parents(db):
 
     async def mock_build(db, member_id):
         call_args.append(member_id)
-        return []
+        return {"the_one_task": None, "events": [], "custody": None, "budget_alerts": []}
 
-    with patch("pib.proactive.build_morning_digest_data", side_effect=mock_build):
+    async def mock_deliver(db, member_id, content, channel=None):
+        return {"ok": False, "error": "test"}
+
+    with patch("pib.proactive.build_morning_digest_data", side_effect=mock_build), \
+         patch("pib.adapters.dispatcher.deliver_to_member", side_effect=mock_deliver):
         await _morning_digest(db)
 
     # Should have been called for both m-james and m-laura (active parents)

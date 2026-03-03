@@ -107,6 +107,14 @@ async def lifespan(app: FastAPI):
         log.warning(f"Sensor bus init failed (non-fatal): {e}")
         app.state.sensor_bus = None
 
+    # Initialize service adapters (Google Calendar, Gmail, BlueBubbles, etc.)
+    try:
+        from pib.adapters import init_adapters
+        adapter_status = await init_adapters(db)
+        log.info(f"Adapters: {adapter_status}")
+    except Exception as e:
+        log.warning(f"Adapter initialization failed (non-fatal): {e}")
+
     yield
 
     if sensor_bus:
@@ -173,6 +181,14 @@ async def health_probe():
     # Write queue (always ok for now — WriteQueue is in-process)
     checks["write_queue"] = {"ok": True, "pending": 0}
 
+    # Service adapters
+    try:
+        from pib.adapters import health_check as adapter_health
+        adapter_status = await adapter_health()
+        checks["adapters"] = adapter_status
+    except Exception:
+        checks["adapters"] = {}
+
     # DB size
     db_path = os.environ.get("PIB_DB_PATH", "pib.db")
     db_size_mb = 0
@@ -180,7 +196,7 @@ async def health_probe():
         db_size_mb = round(os.path.getsize(db_path) / (1024 * 1024), 1)
 
     uptime_minutes = int((time.time() - _app_start_time) / 60)
-    all_ok = all(c.get("ok", False) for c in checks.values())
+    all_ok = all(c.get("ok", False) for c in checks.values() if isinstance(c, dict) and "ok" in c)
     return JSONResponse(
         status_code=200 if all_ok else 503,
         content={

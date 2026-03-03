@@ -674,7 +674,15 @@ async def _tool_send_message(db, inp: dict, member_id: str) -> dict:
         )
         await db.commit()
         return {"queued_for_approval": approval_id, "to": to}
-    return {"status": "queued", "to": to, "content": inp["content"]}
+    # Household member — dispatch via adapter
+    try:
+        from pib.adapters.dispatcher import deliver_to_member
+        channel = inp.get("channel")
+        result = await deliver_to_member(db, to, inp["content"], channel=channel)
+        return {"status": "sent" if result.get("ok") else "queued", "to": to, "content": inp["content"], "delivery": result}
+    except Exception as e:
+        log.warning(f"Message delivery failed, queuing: {e}")
+        return {"status": "queued", "to": to, "content": inp["content"]}
 
 
 async def _tool_query_schedule(db, inp: dict, member_id: str) -> dict:

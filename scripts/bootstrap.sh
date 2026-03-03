@@ -87,7 +87,7 @@ source "$PIB_HOME/venv/bin/activate"
 echo ""
 echo "3. Installing Python dependencies..."
 pip install --upgrade pip
-pip install -e "$PIB_REPO[dev]"
+pip install -e "$PIB_REPO[dev,google]"
 echo "   Done"
 
 # ─── 4. .env file ───
@@ -145,9 +145,20 @@ else
     echo "   No plist found at $PLIST_SRC"
 fi
 
-# ─── 8. Verification ───
+# ─── 8. Cloudflare Tunnel ───
 echo ""
-echo "8. Verification..."
+echo "8. Checking Cloudflare Tunnel..."
+if command -v cloudflared &> /dev/null; then
+    echo "   cloudflared is installed: $(cloudflared --version 2>&1 | head -1)"
+else
+    echo "   cloudflared not found — webhooks will not work from the internet"
+    echo "   Install with: brew install cloudflare/cloudflare/cloudflared"
+    echo "   Then run: cloudflared tunnel login"
+fi
+
+# ─── 9. Verification ───
+echo ""
+echo "9. Verification..."
 python -c "from pib.web import app; print('   Import check: OK')"
 python -c "
 import sqlite3

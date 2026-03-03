@@ -91,6 +91,18 @@ async def setup_scheduler(app, db):
         args=[_sensor_bus_poll, db], id="sensor_bus_poll",
     )
 
+    # ─── Gmail ───
+    scheduler.add_job(
+        _safe_job, CronTrigger.from_crontab("*/15 * * * *"),
+        args=[_gmail_sync, db], id="gmail_sync",
+    )
+
+    # ─── Drive Backup ───
+    scheduler.add_job(
+        _safe_job, CronTrigger.from_crontab("0 * * * *"),
+        args=[_drive_backup, db], id="drive_backup",
+    )
+
     # ─── Comms Domain ───
     scheduler.add_job(
         _safe_job, CronTrigger.from_crontab("*/5 * * * *"),
@@ -157,15 +169,41 @@ async def _safe_job(fn, db):
 # ─── Job Implementations ───
 
 async def _morning_digest(db):
-    """Build and log morning digest (7:15 AM ET). Delivery via adapters when wired."""
+    """Build and deliver morning digest (7:15 AM ET)."""
     from pib.proactive import build_morning_digest_data
     log.info("Running morning digest")
     members = await db.execute_fetchall(
         "SELECT id FROM common_members WHERE active = 1 AND role = 'parent'"
     )
     for member in members or []:
-        data = await build_morning_digest_data(db, member["id"])
-        log.info(f"Morning digest for {member['id']}: {len(data)} sections")
+        member_id = member["id"]
+        data = await build_morning_digest_data(db, member_id)
+        log.info(f"Morning digest for {member_id}: {len(data)} sections")
+
+        # Format digest for delivery
+        sections = []
+        if data.get("the_one_task"):
+            task = data["the_one_task"]
+            title = task.get("title", "Unknown") if isinstance(task, dict) else str(task)
+            sections.append(f"Your #1: {title}")
+        if data.get("events"):
+            sections.append(f"{len(data['events'])} events today")
+        if data.get("custody"):
+            sections.append(data["custody"])
+        if data.get("budget_alerts"):
+            sections.append(f"{len(data['budget_alerts'])} budget alerts")
+
+        if sections:
+            content = f"Good morning! Here's your day:\n" + "\n".join(f"- {s}" for s in sections)
+            try:
+                from pib.adapters.dispatcher import deliver_to_member
+                result = await deliver_to_member(db, member_id, content)
+                if result.get("ok"):
+                    log.info(f"Morning digest delivered to {member_id}")
+                else:
+                    log.warning(f"Morning digest delivery failed for {member_id}: {result}")
+            except Exception as e:
+                log.warning(f"Morning digest delivery unavailable for {member_id}: {e}")
 
 
 async def _proactive_trigger_scan(db):
@@ -290,12 +328,25 @@ async def _push_to_sheets(db):
 
 async def _calendar_incremental_sync(db):
     """Incremental calendar sync every 15 minutes."""
-    log.info("Calendar incremental sync — awaiting Google Calendar adapter")
+    from pib.adapters import get_adapter
+    adapter = get_adapter("google_calendar")
+    if not adapter:
+        log.debug("Calendar incremental sync skipped — adapter not configured")
+        return
+    count = await adapter.poll(db, use_sync_token=True)
+    if count > 0:
+        log.info(f"Calendar incremental sync: {count} events updated")
 
 
 async def _calendar_full_sync(db):
     """Full calendar resync at 2 AM."""
-    log.info("Calendar full sync — awaiting Google Calendar adapter")
+    from pib.adapters import get_adapter
+    adapter = get_adapter("google_calendar")
+    if not adapter:
+        log.debug("Calendar full sync skipped — adapter not configured")
+        return
+    count = await adapter.poll(db, use_sync_token=False)
+    log.info(f"Calendar full sync: {count} events updated")
 
 
 async def _compute_daily_states(db):
@@ -653,3 +704,32 @@ async def _project_gate_expiry(db):
             log.info(f"Expired {expired.rowcount} project gates")
     except Exception as e:
         log.debug(f"Project gate expiry skipped: {e}")
+
+
+# ─── Service Adapter Jobs ───
+
+
+async def _gmail_sync(db):
+    """Poll Gmail inbox every 15 minutes."""
+    from pib.adapters import get_adapter
+    adapter = get_adapter("gmail")
+    if not adapter:
+        log.debug("Gmail sync skipped — adapter not configured")
+        return
+    count = await adapter.poll(db)
+    if count > 0:
+        log.info(f"Gmail sync: {count} new messages ingested")
+
+
+async def _drive_backup(db):
+    """Upload encrypted backup to Google Drive hourly."""
+    from pib.adapters import get_adapter
+    adapter = get_adapter("google_drive")
+    if not adapter:
+        log.debug("Drive backup skipped — adapter not configured")
+        return
+    result = await adapter.upload_backup()
+    if result.get("ok"):
+        log.info(f"Drive backup uploaded: {result.get('name')}")
+    else:
+        log.warning(f"Drive backup failed: {result}")

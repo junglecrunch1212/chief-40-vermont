@@ -112,6 +112,20 @@ async def setup_scheduler(app, db):
         args=[_synthesize_voice_profiles, db], id="synthesize_voice_profiles",
     )
 
+    # ─── Project Domain ───
+    scheduler.add_job(
+        _safe_job, CronTrigger.from_crontab("*/5 7-22 * * *"),
+        args=[_project_advance, db], id="project_advance",
+    )
+    scheduler.add_job(
+        _safe_job, CronTrigger.from_crontab("0 9 * * *"),
+        args=[_project_stale_check, db], id="project_stale_check",
+    )
+    scheduler.add_job(
+        _safe_job, CronTrigger.from_crontab("0 10 * * *"),
+        args=[_project_gate_expiry, db], id="project_gate_expiry",
+    )
+
     # ─── Capture Domain ───
     scheduler.add_job(
         _safe_job, CronTrigger.from_crontab("*/30 7-23 * * *"),
@@ -569,3 +583,68 @@ async def _capture_fts5_rebuild(db):
         log.info("Capture FTS5 index rebuilt")
     except Exception as e:
         log.debug(f"Capture FTS5 rebuild skipped: {e}")
+
+
+# ─── Project Domain Jobs ───
+
+
+async def _project_advance(db):
+    """Advance all active projects every 5 min (7 AM - 10 PM)."""
+    try:
+        from pib.project.engine import advance_project
+
+        rows = await db.execute_fetchall(
+            "SELECT id FROM proj_projects WHERE status IN ('active', 'approved')"
+        )
+        if not rows:
+            return
+
+        advanced = 0
+        for row in rows:
+            try:
+                result = await advance_project(db, row["id"])
+                if result.get("action_taken") != "none":
+                    advanced += 1
+            except Exception as e:
+                log.warning(f"Project {row['id']} advance failed: {e}")
+
+        if advanced > 0:
+            log.info(f"Advanced {advanced} project(s)")
+    except Exception as e:
+        log.debug(f"Project advance skipped: {e}")
+
+
+async def _project_stale_check(db):
+    """Flag stale projects at 9 AM daily."""
+    try:
+        stale = await db.execute_fetchall(
+            """SELECT id, title FROM proj_projects
+               WHERE status = 'active' AND updated_at < datetime('now', '-48 hours')"""
+        )
+        if stale:
+            for row in stale:
+                log.warning(f"Stale project: {row['title']} ({row['id']})")
+                await db.execute(
+                    "INSERT INTO mem_cos_activity (action_type, actor, description, created_at) "
+                    "VALUES ('project_stale', 'scheduler', ?, datetime('now'))",
+                    [f"Project stale: {row['title']} ({row['id']})"],
+                )
+            await db.commit()
+    except Exception as e:
+        log.debug(f"Project stale check skipped: {e}")
+
+
+async def _project_gate_expiry(db):
+    """Expire old pending gates at 10 AM daily."""
+    try:
+        expired = await db.execute(
+            """UPDATE proj_gates SET status = 'expired'
+               WHERE status = 'waiting'
+                 AND auto_expire_hours IS NOT NULL
+                 AND created_at < datetime('now', '-' || auto_expire_hours || ' hours')"""
+        )
+        await db.commit()
+        if expired.rowcount > 0:
+            log.info(f"Expired {expired.rowcount} project gates")
+    except Exception as e:
+        log.debug(f"Project gate expiry skipped: {e}")

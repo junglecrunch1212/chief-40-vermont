@@ -1950,6 +1950,229 @@ async def update_notebook_endpoint(notebook_id: str, request: Request):
 
 
 # ═══════════════════════════════════════════════════════════════
+# Project Domain
+# ═══════════════════════════════════════════════════════════════
+
+
+@app.post("/api/projects/create")
+async def create_project_endpoint(request: Request):
+    """Create a project from a brief. Returns plan for approval."""
+    db = await get_db()
+    body = await request.json()
+    brief = body.get("brief", "").strip()
+    if not brief:
+        raise HTTPException(status_code=400, detail="brief is required")
+
+    requested_by = body.get("requested_by", "m-james")
+
+    from pib.project.planner import decompose_project
+    from pib.project.presenter import present_plan_for_approval
+
+    result = await decompose_project(db, brief, requested_by)
+    presentation = await present_plan_for_approval(db, result["project_id"])
+
+    return JSONResponse(content={**result, "presentation": presentation})
+
+
+@app.post("/api/projects/{project_id}/approve")
+async def approve_project_endpoint(project_id: str, request: Request):
+    """Approve a project plan. Starts execution."""
+    db = await get_db()
+    body = await request.json() if request.headers.get("content-type") == "application/json" else {}
+
+    project = await db.execute_fetchone(
+        "SELECT * FROM proj_projects WHERE id = ?", [project_id]
+    )
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if project["status"] != "pending_approval":
+        raise HTTPException(status_code=400, detail=f"Project status is {project['status']}, not pending_approval")
+
+    approved_by = body.get("approved_by", "m-james")
+    now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    await db.execute(
+        "UPDATE proj_projects SET status = 'approved', approved_by = ?, approved_at = ?, updated_at = ? WHERE id = ?",
+        [approved_by, now, now, project_id],
+    )
+    await db.commit()
+
+    from pib.project.engine import advance_project
+    result = await advance_project(db, project_id)
+
+    return JSONResponse(content={"project_id": project_id, "status": "approved", "advance_result": result})
+
+
+@app.post("/api/projects/{project_id}/dismiss")
+async def dismiss_project_endpoint(project_id: str):
+    """Dismiss (cancel) a project."""
+    db = await get_db()
+
+    project = await db.execute_fetchone(
+        "SELECT * FROM proj_projects WHERE id = ?", [project_id]
+    )
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    await db.execute(
+        "UPDATE proj_projects SET status = 'dismissed', updated_at = ? WHERE id = ?",
+        [now, project_id],
+    )
+
+    # Cancel linked tasks
+    await db.execute(
+        "UPDATE ops_tasks SET status = 'dismissed' WHERE project_ref = ? AND status NOT IN ('done', 'dismissed')",
+        [project_id],
+    )
+    await db.commit()
+
+    return JSONResponse(content={"project_id": project_id, "status": "dismissed"})
+
+
+@app.post("/api/projects/{project_id}/pause")
+async def pause_project_endpoint(project_id: str):
+    """Pause a project."""
+    db = await get_db()
+    now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    await db.execute(
+        "UPDATE proj_projects SET status = 'paused', updated_at = ? WHERE id = ?",
+        [now, project_id],
+    )
+    await db.commit()
+    return JSONResponse(content={"project_id": project_id, "status": "paused"})
+
+
+@app.post("/api/projects/{project_id}/resume")
+async def resume_project_endpoint(project_id: str):
+    """Resume a paused project."""
+    db = await get_db()
+    now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    await db.execute(
+        "UPDATE proj_projects SET status = 'active', updated_at = ? WHERE id = ?",
+        [now, project_id],
+    )
+    await db.commit()
+
+    from pib.project.engine import advance_project
+    result = await advance_project(db, project_id)
+
+    return JSONResponse(content={"project_id": project_id, "status": "active", "advance_result": result})
+
+
+@app.post("/api/projects/gates/{gate_id}/decide")
+async def decide_gate_endpoint(gate_id: str, request: Request):
+    """Resolve a project gate."""
+    db = await get_db()
+    body = await request.json()
+    decision = body.get("decision", "").strip()
+    if decision not in ("approved", "rejected"):
+        raise HTTPException(status_code=400, detail="decision must be 'approved' or 'rejected'")
+
+    gate = await db.execute_fetchone(
+        "SELECT * FROM proj_gates WHERE id = ?", [gate_id]
+    )
+    if not gate:
+        raise HTTPException(status_code=404, detail="Gate not found")
+    if gate["status"] != "waiting":
+        raise HTTPException(status_code=400, detail=f"Gate status is {gate['status']}, not waiting")
+
+    now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    decided_by = body.get("decided_by", "m-james")
+
+    await db.execute(
+        """UPDATE proj_gates SET status = ?, decided_by = ?, decided_at = ?,
+           decision_notes = ?, decision_choice = ? WHERE id = ?""",
+        [decision, decided_by, now,
+         body.get("notes", ""), body.get("choice", ""), gate_id],
+    )
+    await db.commit()
+
+    result = {}
+    if decision == "approved":
+        # Also complete the waiting step if this gate is step-linked
+        if gate["after_step_id"]:
+            await db.execute(
+                "UPDATE proj_steps SET status = 'completed', completed_at = ? WHERE id = ? AND status = 'waiting'",
+                [now, gate["after_step_id"]],
+            )
+            await db.commit()
+
+        from pib.project.engine import advance_project
+        result = await advance_project(db, gate["project_id"])
+    elif decision == "rejected":
+        # If the gate is rejected, block the project
+        await db.execute(
+            "UPDATE proj_projects SET status = 'blocked', updated_at = ? WHERE id = ?",
+            [now, gate["project_id"]],
+        )
+        await db.commit()
+
+    return JSONResponse(content={"gate_id": gate_id, "decision": decision, "advance_result": result})
+
+
+@app.get("/api/projects/{project_id}")
+async def get_project_endpoint(project_id: str):
+    """Get full project state with phases, steps, gates, and research."""
+    db = await get_db()
+
+    project = await db.execute_fetchone(
+        "SELECT * FROM proj_projects WHERE id = ?", [project_id]
+    )
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    project = dict(project)
+
+    phases = await db.execute_fetchall(
+        "SELECT * FROM proj_phases WHERE project_id = ? ORDER BY phase_number",
+        [project_id],
+    )
+    project["phases"] = [dict(p) for p in phases] if phases else []
+
+    steps = await db.execute_fetchall(
+        "SELECT * FROM proj_steps WHERE project_id = ? ORDER BY phase_id, step_number",
+        [project_id],
+    )
+    project["steps"] = [dict(s) for s in steps] if steps else []
+
+    gates = await db.execute_fetchall(
+        "SELECT * FROM proj_gates WHERE project_id = ? ORDER BY created_at",
+        [project_id],
+    )
+    project["gates"] = [dict(g) for g in gates] if gates else []
+
+    research = await db.execute_fetchall(
+        "SELECT * FROM proj_research WHERE project_id = ? ORDER BY created_at DESC LIMIT 50",
+        [project_id],
+    )
+    project["research"] = [dict(r) for r in research] if research else []
+
+    return JSONResponse(content=project)
+
+
+@app.get("/api/projects/active")
+async def list_active_projects_endpoint(requested_by: str = None):
+    """List all non-terminal projects."""
+    db = await get_db()
+
+    sql = """SELECT id, title, status, requested_by, created_at, updated_at
+             FROM proj_projects
+             WHERE status NOT IN ('completed', 'dismissed')"""
+    params = []
+
+    if requested_by:
+        sql += " AND requested_by = ?"
+        params.append(requested_by)
+
+    sql += " ORDER BY updated_at DESC"
+
+    rows = await db.execute_fetchall(sql, params if params else None)
+    projects = [dict(r) for r in rows] if rows else []
+    return JSONResponse(content=projects)
+
+
+# ═══════════════════════════════════════════════════════════════
 # APP ENTRY POINT
 # ═══════════════════════════════════════════════════════════════
 

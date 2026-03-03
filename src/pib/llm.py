@@ -74,6 +74,13 @@ CAPTURE_TRIGGERS = {
     "idea", "recipe", "bookmark", "thought", "jot down", "write down",
     "my notes", "my ideas", "my captures", "my recipes", "my bookmarks",
 }
+PROJECT_TRIGGERS = {
+    "project", "projects", "progress", "status update", "how's the",
+    "phase", "gate", "approve", "dismiss",
+    "piano teacher", "contractor", "renovation", "ADU",
+    "enrollment", "registration", "vendor", "provider",
+    "hire", "booking", "travel", "camp",
+}
 
 
 def build_entity_cache(db_rows: list[dict]) -> dict:
@@ -105,6 +112,8 @@ def analyze_relevance(message: str, entity_cache: dict) -> dict:
         assemblers.add("comms")
     if any(t in msg_lower for t in CAPTURE_TRIGGERS):
         assemblers.add("captures")
+    if any(t in msg_lower for t in PROJECT_TRIGGERS):
+        assemblers.add("projects")
 
     for entity_id, entity in entity_cache.items():
         if entity["pattern"].search(msg_lower):
@@ -495,6 +504,23 @@ TOOLS = [
         "description": "List all notebooks for the current user",
         "input_schema": {"type": "object", "properties": {}},
     },
+    # Project domain
+    {
+        "name": "start_project",
+        "description": "Start a multi-step household project. Use when someone asks to find a service provider, "
+                       "book travel, handle a renovation, enroll in a program, or any other multi-step effort "
+                       "involving research, outreach, or coordination. Creates a phased plan with gates for approval.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "brief": {
+                    "type": "string",
+                    "description": "The project brief — what needs to happen (e.g., 'find a piano teacher for Charlie')",
+                },
+            },
+            "required": ["brief"],
+        },
+    },
 ]
 
 
@@ -552,6 +578,9 @@ async def execute_tool(db, tool_name: str, tool_input: dict, member_id: str) -> 
             return await _tool_share_capture(db, tool_input, member_id)
         elif tool_name == "list_notebooks":
             return await _tool_list_notebooks(db, member_id)
+        # Project domain
+        elif tool_name == "start_project":
+            return await _tool_start_project(db, tool_input, member_id)
         else:
             return {"error": f"Unknown tool: {tool_name}"}
     except Exception as e:
@@ -890,6 +919,44 @@ async def _tool_list_notebooks(db, member_id: str) -> dict:
     }
 
 
+# ─── Project Domain Tool ───
+
+
+async def _tool_start_project(db, inp: dict, member_id: str) -> dict:
+    """Start a household project. Detects signals, decomposes into phased plan."""
+    brief = inp.get("brief", "")
+    if not brief:
+        return {"error": "brief is required"}
+
+    try:
+        from pib.project.detection import detect_project
+        detection = detect_project(brief)
+        if not detection:
+            return {
+                "message": "This doesn't look like a multi-step project. "
+                           "Consider creating a task instead.",
+                "is_project": False,
+            }
+
+        from pib.project.planner import decompose_project
+        from pib.project.presenter import present_plan_for_approval
+
+        result = await decompose_project(db, brief, member_id)
+        presentation = await present_plan_for_approval(db, result["project_id"])
+
+        return {
+            "project_id": result["project_id"],
+            "title": result["title"],
+            "status": "pending_approval",
+            "presentation": presentation,
+            "is_project": True,
+            "detection": detection,
+        }
+    except Exception as e:
+        log.error(f"start_project failed: {e}", exc_info=True)
+        return {"error": f"Project creation failed: {e}"}
+
+
 # ─── Conversation History ───
 
 def build_conversation_history(messages: list[dict], channel: str) -> list[dict]:
@@ -1006,6 +1073,28 @@ async def build_cross_domain_summary(db) -> str:
                 lines.append(f"Second Brain ({name}): {', '.join(cap_parts)}")
     except Exception:
         pass  # Capture tables may not exist yet
+
+    # ── Project stats ──
+    try:
+        from pib.project.context import get_project_stats
+        members = members if members else await db.execute_fetchall(
+            "SELECT id FROM common_members WHERE role != 'child'"
+        )
+        for m in (members or []):
+            mid = m["id"] if isinstance(m, dict) else m[0]
+            pstats = await get_project_stats(db, mid)
+            if pstats["active"] > 0 or pstats["pending_approval"] > 0:
+                p_parts = []
+                if pstats["active"]:
+                    p_parts.append(f"{pstats['active']} active")
+                if pstats["pending_approval"]:
+                    p_parts.append(f"{pstats['pending_approval']} awaiting approval")
+                if pstats["pending_gates"]:
+                    p_parts.append(f"{pstats['pending_gates']} gates pending")
+                name = mid.replace("m-", "").title()
+                lines.append(f"Projects ({name}): {', '.join(p_parts)}")
+    except Exception:
+        pass  # Project tables may not exist yet
 
     # ── Phase ──
     if row["active_phase"]:
@@ -1205,6 +1294,16 @@ async def assemble_context(db, member_id: str, message: str) -> str:
                 parts.append(f"RELEVANT CAPTURES:\n" + "\n".join(cap_lines))
     except Exception:
         pass  # Capture tables may not exist yet
+
+    # Project context injection when relevant
+    try:
+        if "projects" in relevance["assemblers"]:
+            from pib.project.context import assemble_project_context
+            proj_ctx = await assemble_project_context(db, member_id)
+            if proj_ctx:
+                parts.append(f"ACTIVE PROJECTS:\n{proj_ctx}")
+    except Exception:
+        pass  # Project tables may not exist yet
 
     context = "\n\n".join(parts)
     return enforce_budget("assembled_context", context)

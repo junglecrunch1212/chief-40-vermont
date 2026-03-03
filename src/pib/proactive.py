@@ -463,6 +463,12 @@ async def scan_triggers(db, member_id: str) -> list[dict]:
     # ── Capture triggers ──
     fired.extend(await _scan_capture_triggers(db, member_id, now))
 
+    # ── Project triggers ──
+    try:
+        fired.extend(await _scan_project_triggers(db, member_id, now))
+    except Exception as e:
+        log.debug(f"Project trigger scan skipped: {e}")
+
     return fired
 
 
@@ -623,6 +629,90 @@ async def _scan_capture_triggers(db, member_id: str, now: datetime) -> list[dict
 
     except Exception as e:
         log.debug(f"Capture trigger scan skipped: {e}")
+
+    return fired
+
+
+# ─── Project Triggers ───
+
+PROJECT_TRIGGERS = [
+    {
+        "name": "project_stale_check",
+        "priority": 4,
+        "cooldown_minutes": 1440,  # 24 hours
+        "description": "Projects with no step activity > 48h",
+    },
+    {
+        "name": "project_gate_reminder",
+        "priority": 5,
+        "cooldown_minutes": 720,  # 12 hours
+        "description": "Pending gates older than 24 hours",
+    },
+    {
+        "name": "project_progress_update",
+        "priority": 3,
+        "cooldown_minutes": 1440,  # 24 hours
+        "hour": 20,  # 8 PM
+        "description": "Daily project progress summary",
+    },
+]
+
+
+async def _scan_project_triggers(db, member_id: str, now: datetime) -> list[dict]:
+    """Scan project-related proactive triggers. Graceful — if proj tables don't exist, returns []."""
+    fired = []
+    try:
+        for trigger in PROJECT_TRIGGERS:
+            # Check cooldown
+            last = await db.execute_fetchone(
+                "SELECT MAX(created_at) as last_fired FROM mem_cos_activity "
+                "WHERE description LIKE ? AND created_at >= datetime('now', ?)",
+                [f"%{trigger['name']}%", f"-{trigger['cooldown_minutes']} minutes"],
+            )
+            if last and last["last_fired"]:
+                continue
+
+            # Check hour
+            if "hour" in trigger and now.hour != trigger["hour"]:
+                continue
+
+            if trigger["name"] == "project_stale_check":
+                count = await db.execute_fetchone(
+                    """SELECT COUNT(*) as c FROM proj_projects
+                       WHERE status = 'active' AND requested_by = ?
+                         AND updated_at < datetime('now', '-48 hours')""",
+                    [member_id],
+                )
+                if count and count["c"] > 0:
+                    fired.append({"trigger": trigger["name"], "data": {"stale_count": count["c"]}})
+
+            elif trigger["name"] == "project_gate_reminder":
+                gates = await db.execute_fetchall(
+                    """SELECT g.id, g.title, p.title as project_title
+                       FROM proj_gates g
+                       JOIN proj_projects p ON g.project_id = p.id
+                       WHERE g.status = 'waiting' AND p.requested_by = ?
+                         AND g.created_at < datetime('now', '-24 hours')
+                       LIMIT 3""",
+                    [member_id],
+                )
+                if gates:
+                    gate_list = [dict(g) for g in gates]
+                    fired.append({"trigger": trigger["name"], "data": {
+                        "count": len(gate_list),
+                        "gates": gate_list,
+                    }})
+
+            elif trigger["name"] == "project_progress_update":
+                active = await db.execute_fetchone(
+                    "SELECT COUNT(*) as c FROM proj_projects WHERE status = 'active' AND requested_by = ?",
+                    [member_id],
+                )
+                if active and active["c"] > 0:
+                    fired.append({"trigger": trigger["name"], "data": {"active_count": active["c"]}})
+
+    except Exception as e:
+        log.debug(f"Project trigger scan skipped: {e}")
 
     return fired
 

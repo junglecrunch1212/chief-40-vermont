@@ -2,6 +2,7 @@
 
 import asyncio
 import hashlib
+import json
 import logging
 import os
 import time
@@ -137,16 +138,21 @@ async def apply_migrations(db: aiosqlite.Connection, migrations_dir: str | None 
 # ─── ID Generation ───
 
 async def next_id(db: aiosqlite.Connection, prefix: str) -> str:
-    """Generate a sequential prefixed ID: tsk-00001, mem-00001, etc."""
-    await db.execute(
-        "INSERT INTO common_id_sequences (prefix, next_val) VALUES (?, 1) "
-        "ON CONFLICT(prefix) DO UPDATE SET next_val = next_val + 1",
-        [prefix],
-    )
-    row = await db.execute_fetchone(
-        "SELECT next_val FROM common_id_sequences WHERE prefix = ?", [prefix]
-    )
-    return f"{prefix}-{row['next_val']:05d}"
+    """Generate a ULID-based prefixed ID: tsk-01HX..., mem-01HX..., etc."""
+    try:
+        from ulid import ULID
+        return f"{prefix}-{ULID()}"
+    except ImportError:
+        # Fallback to sequential IDs if python-ulid not installed
+        await db.execute(
+            "INSERT INTO common_id_sequences (prefix, next_val) VALUES (?, 1) "
+            "ON CONFLICT(prefix) DO UPDATE SET next_val = next_val + 1",
+            [prefix],
+        )
+        row = await db.execute_fetchone(
+            "SELECT next_val FROM common_id_sequences WHERE prefix = ?", [prefix]
+        )
+        return f"{prefix}-{row['next_val']:05d}"
 
 
 # ─── Write Queue ───
@@ -201,13 +207,23 @@ class WriteQueue:
         if not items:
             return
 
-        try:
-            for sql, params in items:
+        for sql, params in items:
+            try:
                 await self._db.execute(sql, params)
+            except Exception as e:
+                log.error(f"WriteQueue item failed: {e} — moving to dead letter", exc_info=True)
+                try:
+                    await self._db.execute(
+                        "INSERT INTO common_dead_letter (sql_text, params, error, created_at) "
+                        "VALUES (?, ?, ?, datetime('now'))",
+                        [sql, json.dumps(params) if params else "[]", str(e)],
+                    )
+                except Exception:
+                    log.error(f"Dead letter insert also failed for: {sql}")
+        try:
             await self._db.commit()
         except Exception as e:
-            log.error(f"WriteQueue flush failed: {e}", exc_info=True)
-            raise
+            log.error(f"WriteQueue commit failed: {e}", exc_info=True)
 
 
 # ─── Audit Log ───

@@ -39,6 +39,7 @@ def _file_exists(path: str | None) -> bool:
 async def evaluate_readiness(db) -> dict:
     """Evaluate bootstrap/runtime readiness without exposing secret values."""
     checks: dict[str, dict] = {}
+    is_openclaw = os.environ.get("PIB_RUNTIME_MODE") == "openclaw"
 
     for key in CRITICAL_ENV:
         checks[f"env_{key.lower()}"] = {"ok": _is_set(key), "required": True}
@@ -46,10 +47,12 @@ async def evaluate_readiness(db) -> dict:
     for key in OPTIONAL_ENV:
         checks[f"env_{key.lower()}"] = {"ok": _is_set(key), "required": False}
 
+    # OpenClaw handles Google auth — skip GOOGLE_SA_KEY_PATH check in openclaw mode
+    google_required = not is_openclaw
     google_key = os.environ.get("GOOGLE_SA_KEY_PATH")
     google_set = _is_set("GOOGLE_SA_KEY_PATH")
-    checks["env_google_sa_key_path"] = {"ok": google_set, "required": True}
-    checks["google_sa_key_file"] = {"ok": _file_exists(google_key), "required": True}
+    checks["env_google_sa_key_path"] = {"ok": google_set, "required": google_required}
+    checks["google_sa_key_file"] = {"ok": _file_exists(google_key), "required": google_required}
 
     # DB surface checks (tables expected for core launch)
     expected_tables = [
@@ -64,6 +67,16 @@ async def evaluate_readiness(db) -> dict:
             "SELECT name FROM sqlite_master WHERE type='table' AND name = ?", [table]
         )
         checks[f"table_{table}"] = {"ok": row is not None, "required": True}
+
+    # FTS5 trigger existence check
+    fts_triggers = await db.execute_fetchone(
+        "SELECT COUNT(*) as c FROM sqlite_master WHERE type='trigger' AND name LIKE '%fts%'"
+    )
+    checks["fts5_triggers"] = {"ok": (fts_triggers["c"] if fts_triggers else 0) >= 9, "required": False}
+
+    # governance.yaml existence check
+    governance_path = Path(__file__).parent.parent.parent / "config" / "governance.yaml"
+    checks["governance_yaml"] = {"ok": governance_path.exists(), "required": False}
 
     required_failed = [name for name, c in checks.items() if c.get("required") and not c.get("ok")]
     optional_failed = [name for name, c in checks.items() if not c.get("required") and not c.get("ok")]

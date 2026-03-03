@@ -14,6 +14,7 @@ import logging
 from datetime import datetime, time, timedelta
 
 from pib.db import audit_log, get_config, next_id
+from pib.tz import now_et
 
 log = logging.getLogger(__name__)
 
@@ -180,7 +181,7 @@ async def get_comms_counts(db) -> dict:
     result["total_normal"] = row["c"] if row else 0
 
     # Batch breakdown for today
-    today = datetime.now().date().isoformat()
+    today = now_et().date().isoformat()
     rows = await db.execute_fetchall(
         "SELECT batch_window, COUNT(*) as c FROM ops_comms "
         "WHERE batch_date = ? AND visibility = 'normal' GROUP BY batch_window",
@@ -206,7 +207,7 @@ async def get_comm_by_id(db, comm_id: str) -> dict | None:
 
 async def mark_responded(db, comm_id: str, outcome: str = "responded") -> bool:
     """Mark a comm as responded to."""
-    now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = now_et().strftime("%Y-%m-%dT%H:%M:%SZ")
     await db.execute(
         "UPDATE ops_comms SET needs_response = 0, responded_at = ?, outcome = ? WHERE id = ?",
         [now, outcome, comm_id],
@@ -231,7 +232,7 @@ async def snooze_comm(db, comm_id: str, until: str) -> bool:
 
 async def unsnooze_due(db) -> int:
     """Restore visibility for comms whose snooze has expired. Returns count."""
-    now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = now_et().strftime("%Y-%m-%dT%H:%M:%SZ")
     cursor = await db.execute(
         "UPDATE ops_comms SET visibility = 'normal', snoozed_until = NULL "
         "WHERE visibility = 'snoozed' AND snoozed_until <= ?",
@@ -409,7 +410,7 @@ async def mark_draft_sending(db, comm_id: str) -> bool:
 
 async def mark_draft_sent(db, comm_id: str) -> bool:
     """Mark draft as successfully sent."""
-    now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = now_et().strftime("%Y-%m-%dT%H:%M:%SZ")
     await db.execute(
         "UPDATE ops_comms SET draft_status = 'sent', outcome = 'responded', "
         "needs_response = 0, responded_at = ? WHERE id = ?",
@@ -439,10 +440,10 @@ async def capture_manual(db, member_id: str, data: dict) -> str:
     subject (optional), from_addr (optional).
     """
     comm_id = await next_id(db, "c")
-    now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = now_et().strftime("%Y-%m-%dT%H:%M:%SZ")
 
     batch_config = await get_batch_config(db)
-    now_dt = datetime.utcnow()
+    now_dt = now_et()
     window = assign_batch_window(now_dt, batch_config)
     b_date = assign_batch_date(now_dt, window, batch_config)
 

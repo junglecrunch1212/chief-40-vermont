@@ -202,12 +202,14 @@ class TestGetLatestReadings:
 
     @pytest.mark.asyncio
     async def test_get_latest_with_data(self, db, mock_sensor):
+        from datetime import datetime, timezone
         bus = await _setup_bus(db, mock_sensor)
+        now_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         mock_sensor.readings = [
             SensorReading(
                 sensor_id="sensor-mock-test",
                 reading_type="test.value",
-                timestamp="2026-03-02T12:00:00Z",
+                timestamp=now_str,
                 value={"temp": 72},
                 ttl_minutes=1440,  # 24 hours — won't expire during test
             )
@@ -232,13 +234,16 @@ class TestGetReadingHistory:
 
     @pytest.mark.asyncio
     async def test_history_with_data(self, db, mock_sensor):
+        from datetime import datetime, timezone
         bus = await _setup_bus(db, mock_sensor)
+        now_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         mock_sensor.readings = [
             SensorReading(
                 sensor_id="sensor-mock-test",
                 reading_type="test.value",
-                timestamp="2026-03-02T12:00:00Z",
+                timestamp=now_str,
                 value={"temp": 72},
+                ttl_minutes=1440,  # ensure not expired during test
             )
         ]
         await bus.poll_sensor("sensor-mock-test")

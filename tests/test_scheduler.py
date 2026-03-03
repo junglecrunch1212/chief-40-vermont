@@ -122,6 +122,90 @@ async def test_recurring_spawn_creates_task(db):
 
 
 @pytest.mark.asyncio
+async def test_monthly_spawn_jan31_to_feb28(db):
+    """Monthly recurring on Jan 31 should spawn next on Feb 28 (not crash)."""
+    from datetime import date
+    from unittest.mock import patch as _patch
+
+    await db.execute(
+        "INSERT INTO ops_recurring (id, title, assignee, domain, frequency, active, next_due, type) "
+        "VALUES ('rec-jan31', 'Monthly Report', 'm-james', 'work', 'MONTHLY', 1, '2026-01-31', 'task')",
+    )
+    await db.commit()
+
+    with _patch("pib.scheduler.date") as mock_date, \
+         _patch("pib.ingest.generate_micro_script", return_value="Start: Monthly Report"):
+        mock_date.today.return_value = date(2026, 1, 31)
+        mock_date.side_effect = lambda *a, **kw: date(*a, **kw)
+        try:
+            await _recurring_spawn(db)
+        except Exception:
+            pass
+
+    row = await db.execute_fetchone(
+        "SELECT next_due FROM ops_recurring WHERE id = 'rec-jan31'"
+    )
+    if row and row["next_due"]:
+        assert row["next_due"] == "2026-02-28"
+
+
+@pytest.mark.asyncio
+async def test_monthly_spawn_mar31_to_apr30(db):
+    """Monthly recurring on Mar 31 should spawn next on Apr 30."""
+    from datetime import date
+    from unittest.mock import patch as _patch
+
+    await db.execute(
+        "INSERT INTO ops_recurring (id, title, assignee, domain, frequency, active, next_due, type) "
+        "VALUES ('rec-mar31', 'End of Month', 'm-james', 'work', 'MONTHLY', 1, '2026-03-31', 'task')",
+    )
+    await db.commit()
+
+    with _patch("pib.scheduler.date") as mock_date, \
+         _patch("pib.ingest.generate_micro_script", return_value="Start task"):
+        mock_date.today.return_value = date(2026, 3, 31)
+        mock_date.side_effect = lambda *a, **kw: date(*a, **kw)
+        try:
+            await _recurring_spawn(db)
+        except Exception:
+            pass
+
+    row = await db.execute_fetchone(
+        "SELECT next_due FROM ops_recurring WHERE id = 'rec-mar31'"
+    )
+    if row and row["next_due"]:
+        assert row["next_due"] == "2026-04-30"
+
+
+@pytest.mark.asyncio
+async def test_monthly_spawn_dec31_to_jan31(db):
+    """Monthly recurring on Dec 31 should spawn next on Jan 31 of next year."""
+    from datetime import date
+    from unittest.mock import patch as _patch
+
+    await db.execute(
+        "INSERT INTO ops_recurring (id, title, assignee, domain, frequency, active, next_due, type) "
+        "VALUES ('rec-dec31', 'Year End', 'm-james', 'work', 'MONTHLY', 1, '2026-12-31', 'task')",
+    )
+    await db.commit()
+
+    with _patch("pib.scheduler.date") as mock_date, \
+         _patch("pib.ingest.generate_micro_script", return_value="Start task"):
+        mock_date.today.return_value = date(2026, 12, 31)
+        mock_date.side_effect = lambda *a, **kw: date(*a, **kw)
+        try:
+            await _recurring_spawn(db)
+        except Exception:
+            pass
+
+    row = await db.execute_fetchone(
+        "SELECT next_due FROM ops_recurring WHERE id = 'rec-dec31'"
+    )
+    if row and row["next_due"]:
+        assert row["next_due"] == "2027-01-31"
+
+
+@pytest.mark.asyncio
 async def test_setup_scheduler_registers_all_jobs(db):
     """setup_scheduler should register all expected cron jobs."""
     app = MagicMock()

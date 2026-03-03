@@ -32,3 +32,31 @@ def test_validate_strict_startup_raises(monkeypatch):
 def test_validate_strict_startup_no_raise(monkeypatch):
     monkeypatch.setenv("PIB_STRICT_STARTUP", "1")
     validate_strict_startup({"ready": True, "required_failed": []})
+
+
+@pytest.mark.asyncio
+async def test_openclaw_mode_skips_google_check(db, monkeypatch):
+    """In openclaw mode, GOOGLE_SA_KEY_PATH should not be required."""
+    monkeypatch.setenv("PIB_RUNTIME_MODE", "openclaw")
+    for key in ["ANTHROPIC_API_KEY", "TWILIO_AUTH_TOKEN", "TWILIO_PHONE_NUMBER",
+                "BLUEBUBBLES_SECRET", "SIRI_BEARER_TOKEN"]:
+        monkeypatch.setenv(key, "test-value")
+    monkeypatch.delenv("GOOGLE_SA_KEY_PATH", raising=False)
+
+    report = await evaluate_readiness(db)
+    # Google should NOT be in required_failed when in openclaw mode
+    assert "env_google_sa_key_path" not in report["required_failed"]
+
+
+@pytest.mark.asyncio
+async def test_fts5_trigger_check_present(db):
+    """After migrations, FTS5 triggers should be detected."""
+    report = await evaluate_readiness(db)
+    assert "fts5_triggers" in report["checks"]
+
+
+@pytest.mark.asyncio
+async def test_governance_yaml_check_present(db):
+    """governance.yaml check should be present in readiness report."""
+    report = await evaluate_readiness(db)
+    assert "governance_yaml" in report["checks"]

@@ -1,6 +1,7 @@
 """Scheduler: APScheduler AsyncIOScheduler for all cron jobs."""
 
 import logging
+from datetime import date
 
 log = logging.getLogger(__name__)
 
@@ -182,7 +183,6 @@ async def _proactive_trigger_scan(db):
 
 async def _recurring_spawn(db):
     """Spawn tasks from ops_recurring at midnight."""
-    from datetime import date
     from pib.db import next_id
     from pib.ingest import generate_micro_script
 
@@ -218,7 +218,13 @@ async def _recurring_spawn(db):
             from datetime import timedelta
             next_due = today + timedelta(weeks=1)
         elif freq_upper == "MONTHLY":
-            next_due = today.replace(month=today.month + 1) if today.month < 12 else today.replace(year=today.year + 1, month=1)
+            import calendar
+            if today.month == 12:
+                next_month, next_year = 1, today.year + 1
+            else:
+                next_month, next_year = today.month + 1, today.year
+            last_day = calendar.monthrange(next_year, next_month)[1]
+            next_due = today.replace(year=next_year, month=next_month, day=min(today.day, last_day))
         else:
             next_due = None
 
@@ -287,7 +293,6 @@ async def _compute_daily_states(db):
       3. Sensor readings (via enrichment layer)
       4. Task/budget context
     """
-    from datetime import date
     from pib.custody import who_has_child
     from pib.engine import compute_complexity_score
     import json

@@ -2,9 +2,8 @@
 
 import json
 from datetime import date, datetime, timedelta
-from zoneinfo import ZoneInfo
 
-HOUSEHOLD_TZ = ZoneInfo("America/New_York")  # Atlanta
+from pib.tz import HOUSEHOLD_TZ
 
 
 def who_has_child(query_date: date, config: dict) -> str:
@@ -18,9 +17,14 @@ def who_has_child(query_date: date, config: dict) -> str:
     other_parent = config["other_parent"]
 
     # Holiday overrides take priority
-    overrides = json.loads(config.get("holiday_overrides", "[]"))
+    try:
+        overrides = json.loads(config.get("holiday_overrides", "[]"))
+    except (json.JSONDecodeError, TypeError):
+        overrides = []
     for override in overrides:
-        if override["start"] <= query_date.isoformat() <= override["end"]:
+        start = override.get("start") or override.get("date")
+        end = override.get("end") or start
+        if start and end and start <= query_date.isoformat() <= end:
             return override["parent"]
 
     # Calendar-day difference (immune to DST)

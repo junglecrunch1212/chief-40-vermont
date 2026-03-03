@@ -712,12 +712,12 @@ async def _tool_undo_last(db, member_id: str) -> dict:
     if not row:
         return {"error": "Nothing to undo"}
     undo = dict(row)
-    if undo.get("undo_sql"):
-        await db.executescript(undo["undo_sql"])
+    if undo.get("restore_data"):
+        await db.executescript(undo["restore_data"])
         await db.execute("DELETE FROM common_undo_log WHERE id = ?", [undo["id"]])
         await db.commit()
-        return {"undone": undo["description"]}
-    return {"error": "No undo SQL available for this action"}
+        return {"undone": undo.get("operation", "last action")}
+    return {"error": "No restore data available for this action"}
 
 
 async def _tool_approve_pending(db, inp: dict, member_id: str) -> dict:

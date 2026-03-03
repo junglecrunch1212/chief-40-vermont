@@ -19,8 +19,9 @@ async def fts5_rebuild(db):
             log.error(f"FTS5 rebuild failed for {table}: {e}")
 
 
-async def backup_verify(backup_dir: str = "/opt/pib/data/backups") -> dict:
+async def backup_verify(backup_dir: str | None = None) -> dict:
     """Verify latest backup integrity. An unverified backup is not a backup."""
+    backup_dir = backup_dir or os.environ.get("PIB_BACKUP_DIR", "/opt/pib/data/backups")
     import aiosqlite
 
     backups = sorted(glob(os.path.join(backup_dir, "*.db")))

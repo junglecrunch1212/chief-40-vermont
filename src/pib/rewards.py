@@ -29,11 +29,29 @@ REWARD_SCHEDULE = [
 ]
 
 
-def select_reward(member_id: str, task: dict, stats: dict) -> tuple[str, str]:
+CHILD_REWARD_POOL = [
+    (0.60, "simple", ["Great job!", "You did it!", "Way to go!", "Awesome!"]),
+    (0.25, "warm", [
+        "That's {today_count} things done today. You're a superstar!",
+        "Keep it up! You're on a roll!",
+        "Your parents are so proud of you!",
+    ]),
+    (0.10, "delight", [
+        "You're like a superhero getting things done!",
+        "High five! You're doing amazing!",
+    ]),
+    (0.05, "jackpot", [
+        "WOW! You've done so many things today! You're incredible!",
+    ]),
+]
+
+
+def select_reward(member_id: str, task: dict, stats: dict, member_age: int | None = None) -> tuple[str, str]:
     """Select reward tier and message. Returns (tier, message)."""
+    schedule = CHILD_REWARD_POOL if (member_age is not None and member_age < 13) else REWARD_SCHEDULE
     roll = random.random()
     cumulative = 0.0
-    for prob, tier, templates in REWARD_SCHEDULE:
+    for prob, tier, templates in schedule:
         cumulative += prob
         if roll <= cumulative:
             template = random.choice(templates)
@@ -107,7 +125,7 @@ async def update_streak(db, member_id: str, completion_date: date) -> dict:
 
 # ─── Task Completion with Rewards ───
 
-async def get_completion_stats(db, member_id: str) -> dict:
+async def get_completion_stats(db, member_id: str, task_id: str | None = None) -> dict:
     """Get stats needed for reward message interpolation."""
     row = await db.execute_fetchone(
         "SELECT completions_today FROM pib_energy_states "
@@ -130,23 +148,48 @@ async def get_completion_stats(db, member_id: str) -> dict:
     )
     current_streak = streak_row["current_streak"] if streak_row else 0
 
+    # Compute days_old from task creation date
+    days_old = 0
+    if task_id:
+        task_row = await db.execute_fetchone(
+            "SELECT created_at FROM ops_tasks WHERE id = ?", [task_id]
+        )
+        if task_row and task_row["created_at"]:
+            try:
+                from datetime import datetime
+                created = datetime.fromisoformat(task_row["created_at"].replace("Z", "+00:00"))
+                days_old = (datetime.now(created.tzinfo) - created).days
+            except (ValueError, TypeError):
+                days_old = 0
+
+    # Compute days_since_all_clear
+    days_since_all_clear = "?"
+    clear_row = await db.execute_fetchone(
+        "SELECT MAX(state_date) as last_clear FROM pib_energy_states "
+        "WHERE member_id = ? AND completions_today > 0 AND state_date < date('now')",
+        [member_id],
+    )
+    if clear_row and clear_row["last_clear"]:
+        try:
+            last_clear = date.fromisoformat(clear_row["last_clear"])
+            days_since_all_clear = (date.today() - last_clear).days
+        except (ValueError, TypeError):
+            pass
+
     return {
         "completions_today": completions_today,
         "week_completions": week_completions,
         "current_streak": current_streak,
-        "days_old": 0,
-        "days_since_all_clear": "?",
+        "days_old": days_old,
+        "days_since_all_clear": days_since_all_clear,
     }
 
 
 async def complete_task_with_reward(db, task_id: str, member_id: str, actor: str) -> dict:
     """Complete a task, update streak, select reward, log everything."""
-    # 1. Complete the task
-    await db.execute(
-        "UPDATE ops_tasks SET status='done', completed_at=datetime('now'), "
-        "completed_by=?, updated_at=datetime('now') WHERE id=?",
-        [actor, task_id],
-    )
+    # 1. Complete the task using state machine (not raw SQL bypass)
+    from pib.engine import transition_task
+    await transition_task(db, task_id, "done", {}, actor)
 
     # 2. Update velocity
     await db.execute(
@@ -161,7 +204,7 @@ async def complete_task_with_reward(db, task_id: str, member_id: str, actor: str
     streak = await update_streak(db, member_id, date.today())
 
     # 4. Select reward
-    stats = await get_completion_stats(db, member_id)
+    stats = await get_completion_stats(db, member_id, task_id=task_id)
     task_row = await db.execute_fetchone("SELECT * FROM ops_tasks WHERE id = ?", [task_id])
     task = dict(task_row) if task_row else {}
     tier, message = select_reward(member_id, task, stats)

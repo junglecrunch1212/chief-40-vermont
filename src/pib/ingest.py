@@ -156,31 +156,42 @@ async def ingest(event: IngestEvent, db, event_bus=None) -> list[dict]:
     # STAGE 4-8: Route through LLM for classification + response
     if event.text and event.member_id:
         channel = event.reply_channel or event.source
-        try:
-            from pib.llm import chat as llm_chat
-            result = await llm_chat(db, event.text, event.member_id, channel)
-            actions.append({
-                "action": "llm_response",
-                "response": result.get("response", ""),
-                "session_id": result.get("session_id"),
-                "tool_actions": result.get("actions", []),
-            })
-            # Queue outbound reply if there's a reply channel
-            if event.reply_channel and event.reply_address and result.get("response"):
-                actions.append({
-                    "action": "outbound_reply",
-                    "channel": event.reply_channel,
-                    "to": event.reply_address,
-                    "content": result["response"],
-                })
-        except Exception as e:
-            log.error(f"LLM processing failed for ingest: {e}", exc_info=True)
+
+        # OpenClaw mode: skip inline LLM, queue for external processing
+        import os
+        if os.environ.get("PIB_RUNTIME_MODE") == "openclaw":
             actions.append({
                 "action": "queued_for_processing",
                 "text": event.text,
                 "member_id": event.member_id,
-                "error": str(e),
+                "reason": "openclaw_mode",
             })
+        else:
+            try:
+                from pib.llm import chat as llm_chat
+                result = await llm_chat(db, event.text, event.member_id, channel)
+                actions.append({
+                    "action": "llm_response",
+                    "response": result.get("response", ""),
+                    "session_id": result.get("session_id"),
+                    "tool_actions": result.get("actions", []),
+                })
+                # Queue outbound reply if there's a reply channel
+                if event.reply_channel and event.reply_address and result.get("response"):
+                    actions.append({
+                        "action": "outbound_reply",
+                        "channel": event.reply_channel,
+                        "to": event.reply_address,
+                        "content": result["response"],
+                    })
+            except Exception as e:
+                log.error(f"LLM processing failed for ingest: {e}", exc_info=True)
+                actions.append({
+                    "action": "queued_for_processing",
+                    "text": event.text,
+                    "member_id": event.member_id,
+                    "error": str(e),
+                })
 
     await db.commit()
     return actions
@@ -245,7 +256,24 @@ async def route_prefix(db, prefix_result: dict, event: IngestEvent) -> dict:
         return {"action": "task_created", "task_id": task_id, "title": content}
 
     elif shape == "state":
-        return {"action": "state_command", "command": metadata["action"], "value": content}
+        member = event.member_id or "m-james"
+        action = metadata["action"]
+        if action == "medication_taken":
+            await db.execute(
+                "INSERT INTO pib_energy_states (member_id, state_date, meds_taken, meds_taken_at) "
+                "VALUES (?, date('now'), 1, datetime('now')) "
+                "ON CONFLICT(member_id, state_date) DO UPDATE SET meds_taken=1, meds_taken_at=datetime('now')",
+                [member],
+            )
+        elif action == "sleep_report":
+            value = content or "okay"
+            await db.execute(
+                "INSERT INTO pib_energy_states (member_id, state_date, sleep_quality) "
+                "VALUES (?, date('now'), ?) "
+                "ON CONFLICT(member_id, state_date) DO UPDATE SET sleep_quality=?",
+                [member, value, value],
+            )
+        return {"action": "state_recorded", "command": action, "value": content, "member_id": member}
 
     elif shape == "memory":
         return {"action": "memory_save", "content": content}

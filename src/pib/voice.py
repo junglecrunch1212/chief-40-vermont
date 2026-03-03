@@ -14,6 +14,7 @@ import os
 from datetime import datetime
 
 from pib.db import get_config, next_id
+from pib.tz import now_et
 
 log = logging.getLogger(__name__)
 
@@ -26,6 +27,23 @@ SCOPE_LEVELS = {
     "channel_x_type": 4,
     "person": 5,
 }
+
+
+# ─── Privacy Filter ───
+
+PRIVILEGED_DOMAINS = ["evolvefamilylawga.com", "evolve.law"]
+
+
+def _is_from_privileged_domain(item_ref: str | None, labels: dict | None = None) -> bool:
+    """Check if a message is from a privileged domain (Laura's work)."""
+    check_values = []
+    if item_ref:
+        check_values.append(item_ref.lower())
+    if labels:
+        for v in labels.values():
+            if v:
+                check_values.append(str(v).lower())
+    return any(domain in val for val in check_values for domain in PRIVILEGED_DOMAINS)
 
 
 # ─── Corpus Collection ───
@@ -49,6 +67,11 @@ async def collect_voice_sample(
 
     This is fire-and-forget — collection failure never blocks the pipeline.
     """
+    # Privacy filter: don't store samples from privileged domains
+    if _is_from_privileged_domain(item_ref, {"comm_type": comm_type, "recipient_type": recipient_type}):
+        log.debug(f"Voice sample filtered: privileged domain for {item_ref}")
+        return ""
+
     sample_id = await next_id(db, "vs")
     word_count = len(body.split())
     formality = _estimate_formality(body)
@@ -190,7 +213,7 @@ async def synthesize_profiles(db, member_id: str) -> int:
 
 async def _build_profile(db, member_id: str, scope: str, scope_level: int, samples: list[dict]):
     """Build or update a single voice profile from samples."""
-    now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = now_et().strftime("%Y-%m-%dT%H:%M:%SZ")
 
     # Calculate stats
     word_counts = [s["word_count"] for s in samples if s.get("word_count")]
@@ -229,20 +252,33 @@ async def _build_profile(db, member_id: str, scope: str, scope_level: int, sampl
     await db.commit()
 
 
+# Module-level lazy singleton for Anthropic client
+# Note: OpenClaw will replace this with its model routing
+_anthropic_client = None
+
+
+def _get_anthropic_client():
+    """Get or create a lazy singleton Anthropic client."""
+    global _anthropic_client
+    if _anthropic_client is None:
+        import anthropic
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        if not api_key:
+            return None
+        _anthropic_client = anthropic.AsyncAnthropic(api_key=api_key)
+    return _anthropic_client
+
+
 async def _synthesize_style_summary(samples: list[dict]) -> str | None:
     """Use LLM to summarize writing style from samples. Returns None on failure."""
     try:
-        import anthropic
-
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
-        if not api_key:
+        client = _get_anthropic_client()
+        if not client:
             return _fallback_style_summary(samples)
 
         # Take a representative subset (max 10 samples)
         subset = samples[:10]
         sample_text = "\n---\n".join(s["body"][:200] for s in subset)
-
-        client = anthropic.AsyncAnthropic(api_key=api_key)
         response = await client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=200,

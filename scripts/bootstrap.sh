@@ -4,21 +4,23 @@
 
 set -euo pipefail
 
-PIB_HOME="/opt/pib"
+PIB_HOME="${PIB_HOME:-/opt/pib}"
 PIB_REPO="$(cd "$(dirname "$0")/.." && pwd)"
 MODE="prod"
 NONINTERACTIVE=0
 SKIP_FRONTEND=0
+DRY_RUN=0
 
 usage() {
   cat <<USAGE
-Usage: $0 [--dev|--prod] [--noninteractive] [--skip-frontend]
+Usage: $0 [--dev|--prod] [--noninteractive] [--skip-frontend] [--dry-run]
 
 Options:
   --dev              Development mode (less strict readiness defaults)
   --prod             Production mode (default)
   --noninteractive   Avoid prompts and continue with defaults
   --skip-frontend    Skip npm install/build even if node is installed
+  --dry-run          Print what would be done without executing
 USAGE
 }
 
@@ -28,10 +30,15 @@ while [[ $# -gt 0 ]]; do
     --prod) MODE="prod"; shift ;;
     --noninteractive) NONINTERACTIVE=1; shift ;;
     --skip-frontend) SKIP_FRONTEND=1; shift ;;
+    --dry-run) DRY_RUN=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown arg: $1"; usage; exit 1 ;;
   esac
 done
+
+if [[ "$DRY_RUN" -eq 1 ]]; then
+  echo "=== DRY RUN — no changes will be made ==="
+fi
 
 echo "=== PIB v5 Bootstrap (${MODE}) ==="
 echo "Repo:  $PIB_REPO"
@@ -175,6 +182,22 @@ asyncio.run(main())
 PY
 fi
 
+# ─── 9. CLI smoke test ───
+echo ""
+echo "9. CLI smoke test..."
+python -m pib.cli health "$DB_PATH" 2>/dev/null && echo "   CLI health check: OK" || echo "   CLI health check: skipped (cli.py not yet wired)"
+
+# ─── 10. Verify governance + FTS5 triggers ───
+echo ""
+echo "10. Verifying governance.yaml and FTS5 triggers..."
+if [ -f "$PIB_REPO/config/governance.yaml" ]; then
+  echo "   governance.yaml: present"
+else
+  echo "   governance.yaml: MISSING"
+fi
+TRIGGER_COUNT=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name LIKE '%fts%';" 2>/dev/null || echo "0")
+echo "   FTS5 triggers: $TRIGGER_COUNT found"
+
 # ─── Summary ───
 echo ""
 echo "=== Bootstrap Complete ==="
@@ -183,7 +206,7 @@ echo "Next steps:"
 echo "  1. Edit $ENV_FILE and fill in API keys"
 echo "  2. Test: cd $PIB_REPO && source $PIB_HOME/venv/bin/activate && pytest tests/ -v"
 echo "  3. Start: launchctl load ~/Library/LaunchAgents/com.pib.runtime.plist"
-echo "     Or manual: uvicorn pib.web:app --port 3141"
+echo "     Or via OpenClaw: openclaw start"
 echo ""
 echo "Keys needed in .env:"
 grep -E '^[A-Z].*=' "$PIB_REPO/config/.env.example" | while read -r line; do

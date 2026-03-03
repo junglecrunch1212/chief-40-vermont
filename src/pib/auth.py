@@ -1,5 +1,6 @@
 """Authentication layer: Cloudflare Access, Twilio signature, rate limiter."""
 
+import base64
 import hashlib
 import hmac
 import logging
@@ -74,7 +75,6 @@ def validate_twilio_signature(request_url: str, params: dict, signature: str) ->
         hashlib.sha1,
     ).digest()
 
-    import base64
     expected = base64.b64encode(computed).decode("utf-8")
     return hmac.compare_digest(expected, signature)
 

@@ -1989,7 +1989,7 @@ async def approve_project_endpoint(project_id: str, request: Request):
         raise HTTPException(status_code=400, detail=f"Project status is {project['status']}, not pending_approval")
 
     approved_by = body.get("approved_by", "m-james")
-    now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = now_et().isoformat()
 
     await db.execute(
         "UPDATE proj_projects SET status = 'approved', approved_by = ?, approved_at = ?, updated_at = ? WHERE id = ?",
@@ -2014,7 +2014,7 @@ async def dismiss_project_endpoint(project_id: str):
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = now_et().isoformat()
     await db.execute(
         "UPDATE proj_projects SET status = 'dismissed', updated_at = ? WHERE id = ?",
         [now, project_id],
@@ -2034,7 +2034,7 @@ async def dismiss_project_endpoint(project_id: str):
 async def pause_project_endpoint(project_id: str):
     """Pause a project."""
     db = await get_db()
-    now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = now_et().isoformat()
     await db.execute(
         "UPDATE proj_projects SET status = 'paused', updated_at = ? WHERE id = ?",
         [now, project_id],
@@ -2047,7 +2047,7 @@ async def pause_project_endpoint(project_id: str):
 async def resume_project_endpoint(project_id: str):
     """Resume a paused project."""
     db = await get_db()
-    now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = now_et().isoformat()
     await db.execute(
         "UPDATE proj_projects SET status = 'active', updated_at = ? WHERE id = ?",
         [now, project_id],
@@ -2077,7 +2077,7 @@ async def decide_gate_endpoint(gate_id: str, request: Request):
     if gate["status"] != "waiting":
         raise HTTPException(status_code=400, detail=f"Gate status is {gate['status']}, not waiting")
 
-    now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = now_et().isoformat()
     decided_by = body.get("decided_by", "m-james")
 
     await db.execute(

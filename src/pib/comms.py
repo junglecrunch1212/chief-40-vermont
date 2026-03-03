@@ -23,13 +23,20 @@ log = logging.getLogger(__name__)
 
 BATCH_WINDOWS = ["morning", "midday", "evening"]
 
+BATCH_DEFAULTS = {
+    "morning": ("07:00", "11:59"),
+    "midday": ("12:00", "17:59"),
+    "evening": ("18:00", "21:59"),
+}
+
 
 async def get_batch_config(db) -> dict:
     """Load batch window start/end times from pib_config."""
     config = {}
     for window in BATCH_WINDOWS:
-        start = await get_config(db, f"comms_batch_{window}_start", "08:00")
-        end = await get_config(db, f"comms_batch_{window}_end", "09:00")
+        default_start, default_end = BATCH_DEFAULTS[window]
+        start = await get_config(db, f"comms_batch_{window}_start", default_start)
+        end = await get_config(db, f"comms_batch_{window}_end", default_end)
         h_s, m_s = map(int, start.split(":"))
         h_e, m_e = map(int, end.split(":"))
         config[window] = {

@@ -7,9 +7,9 @@
 
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/local/bin/openclaw</string>
-        <string>gateway</string>
-        <string>start</string>
+        <string>/bin/sh</string>
+        <string>-c</string>
+        <string>exec openclaw gateway start</string>
     </array>
 
     <key>WorkingDirectory</key>
@@ -22,7 +22,7 @@
         <key>PIB_LOG_DIR</key>
         <string>/opt/pib/logs</string>
         <key>PATH</key>
-        <string>/usr/local/bin:/opt/pib/venv/bin:/usr/bin:/bin</string>
+        <string>/opt/homebrew/bin:/usr/local/bin:/opt/pib/venv/bin:/usr/bin:/bin</string>
     </dict>
 
     <key>RunAtLoad</key>

@@ -116,18 +116,16 @@ echo "   Database at $DB_PATH"
 echo ""
 echo "6. Building frontend..."
 if [[ "$SKIP_FRONTEND" -eq 1 ]]; then
-  echo "   Frontend build skipped by flag"
+  echo "   Console start skipped by flag"
 elif command -v node &> /dev/null; then
-    if [ -d "$PIB_REPO/frontend" ]; then
-        cd "$PIB_REPO/frontend"
-        if [ ! -d "node_modules" ]; then
-            npm install
-        fi
-        npm run build
-        echo "   Frontend built to $PIB_REPO/static/"
+    if [ -f "$PIB_REPO/console/server.mjs" ]; then
+        echo "   Console server found at $PIB_REPO/console/server.mjs"
+        echo "   Start with: node $PIB_REPO/console/server.mjs"
+    else
+        echo "   Console server not found at $PIB_REPO/console/server.mjs"
     fi
 else
-    echo "   Node.js not found — skipping frontend build"
+    echo "   Node.js not found — skipping console setup"
     echo "   Install with: brew install node"
 fi
 
@@ -148,7 +146,7 @@ fi
 # ─── 8. Verification ───
 echo ""
 echo "8. Verification..."
-python -c "from pib.web import app; print('   Import check: OK')"
+python -m pib.cli health "$DB_PATH" --json && echo "   Health check: OK" || { echo "   Health check: FAILED"; exit 1; }
 python -c "
 import sqlite3
 conn = sqlite3.connect('$DB_PATH')

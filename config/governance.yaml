@@ -27,6 +27,14 @@ action_gates:
   webhook_receive: true        # Inbound messages always processed
   run_proactive_checks: true   # Cron-triggered, always auto-approve
   member_settings_set: confirm # Per-member settings require confirmation
+  # Channel management
+  channel_enable: confirm      # Enabling channels requires approval
+  channel_disable: confirm
+  channel_add: confirm
+  channel_update: confirm
+  channel_grant_access: confirm
+  channel_revoke_access: confirm
+  channel_setup_member: confirm
 
 # Agent-specific overrides (merged on top of defaults above)
 agent_overrides:

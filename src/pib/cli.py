@@ -50,12 +50,21 @@ WRITE_COMMANDS = {
     "state-update", "capture",
     "run-proactive-checks", "webhook-receive",
     "member-settings-set",
+    # Channel commands (writes)
+    "channel-enable", "channel-disable", "channel-step-done",
+    "channel-add", "channel-update",
+    "channel-grant-access", "channel-revoke-access", "channel-setup-member",
+    "device-status",
 }
 ADMIN_COMMANDS = {"bootstrap", "backup", "migrate"}
 READ_COMMANDS = {
     "what-now", "calendar-query", "custody", "budget", "search",
     "morning-digest", "health", "streak", "upcoming", "scoreboard-data",
     "member-settings-get",
+    # Channel commands (reads)
+    "channel-list", "channel-status", "channel-onboarding", "channel-test",
+    "channel-send-enum", "channel-member-list",
+    "device-list", "account-list",
 }
 
 # Map CLI commands to governance action_gates keys
@@ -74,6 +83,14 @@ COMMAND_TO_GATE = {
     "webhook-receive": "webhook_receive",
     "run-proactive-checks": "run_proactive_checks",
     "member-settings-set": "member_settings_set",
+    # Channel commands
+    "channel-enable": "channel_enable",
+    "channel-disable": "channel_disable",
+    "channel-add": "channel_add",
+    "channel-update": "channel_update",
+    "channel-grant-access": "channel_grant_access",
+    "channel-revoke-access": "channel_revoke_access",
+    "channel-setup-member": "channel_setup_member",
 }
 
 ALL_COMMANDS = READ_COMMANDS | WRITE_COMMANDS | ADMIN_COMMANDS
@@ -892,6 +909,9 @@ async def cmd_member_settings_set(db, args: dict, agent_id: str) -> dict:
 # COMMAND REGISTRY
 # ═══════════════════════════════════════════════════════════
 
+# Import channel commands
+from pib.channel_cli import CHANNEL_COMMANDS
+
 COMMAND_REGISTRY: dict[str, tuple[Any, str]] = {
     # (handler, category)
     "bootstrap":            (cmd_bootstrap,             "admin"),
@@ -923,6 +943,15 @@ COMMAND_REGISTRY: dict[str, tuple[Any, str]] = {
     "member-settings-get":  (cmd_member_settings_get,   "read"),
     "member-settings-set":  (cmd_member_settings_set,   "write"),
 }
+
+# Merge channel commands into registry
+for cmd_name, handler in CHANNEL_COMMANDS.items():
+    if cmd_name in READ_COMMANDS:
+        COMMAND_REGISTRY[cmd_name] = (handler, "read")
+    elif cmd_name in WRITE_COMMANDS:
+        COMMAND_REGISTRY[cmd_name] = (handler, "write")
+    else:
+        COMMAND_REGISTRY[cmd_name] = (handler, "read")
 
 
 # ═══════════════════════════════════════════════════════════

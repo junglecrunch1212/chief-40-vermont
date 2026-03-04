@@ -205,11 +205,15 @@ async def complete_task_with_reward(db, task_id: str, member_id: str, actor: str
     # 3. Update streak
     streak = await update_streak(db, member_id, date.today())
 
-    # 4. Select reward
+    # 4. Select reward (age-aware for child-appropriate messages)
     stats = await get_completion_stats(db, member_id, task_id=task_id)
     task_row = await db.execute_fetchone("SELECT * FROM ops_tasks WHERE id = ?", [task_id])
     task = dict(task_row) if task_row else {}
-    tier, message = select_reward(member_id, task, stats)
+    member_row = await db.execute_fetchone(
+        "SELECT age FROM common_members WHERE id = ?", [member_id]
+    )
+    member_age = member_row["age"] if member_row and member_row.get("age") is not None else None
+    tier, message = select_reward(member_id, task, stats, member_age=member_age)
 
     # 5. Log reward
     await db.execute(

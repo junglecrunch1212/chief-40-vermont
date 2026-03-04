@@ -5,7 +5,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 
-from pib.tz import now_et
+from pib.tz import now_et, HOUSEHOLD_TZ
 
 log = logging.getLogger(__name__)
 
@@ -105,7 +105,8 @@ async def transition_task(db, task_id: str, new_status: str, update_data: dict, 
     # Validate all columns against whitelist before building SQL
     for col in sets:
         col_name = col.split("=")[0].strip()
-        assert col_name in ALLOWED_UPDATE_COLUMNS, f"Disallowed column in task update: {col_name}"
+        if col_name not in ALLOWED_UPDATE_COLUMNS:
+            raise ValueError(f"Disallowed column in task update: {col_name}")
 
     params.append(task_id)
     await db.execute(f"UPDATE ops_tasks SET {', '.join(sets)} WHERE id = ?", params)
@@ -317,7 +318,8 @@ def what_now(member_id: str, snapshot: DBSnapshot) -> WhatNowResult:
                     continue
                 s = datetime.fromisoformat(event_start) if "T" in event_start else datetime.strptime(event_start, "%H:%M").replace(year=today.year, month=today.month, day=today.day)
                 e = datetime.fromisoformat(event_end) if "T" in event_end else datetime.strptime(event_end, "%H:%M").replace(year=today.year, month=today.month, day=today.day)
-                if s <= now.replace(tzinfo=None) <= e:
+                now_naive = now.astimezone(HOUSEHOLD_TZ).replace(tzinfo=None) if now.tzinfo else now
+                if s <= now_naive <= e:
                     calendar_status = f"In: {event.get('title', 'event')} until {event_end}"
                     break
             except (ValueError, TypeError):

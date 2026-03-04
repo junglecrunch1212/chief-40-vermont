@@ -9,7 +9,8 @@
 
 import express from "express";
 import Database from "better-sqlite3";
-import { execSync, spawn } from "child_process";
+import { execFileSync, spawn } from "child_process";
+import crypto from "crypto";
 import { readFileSync, existsSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
@@ -40,20 +41,20 @@ function getDB() {
 // ═══════════════════════════════════════════════════════════
 
 function runCLI(command, args = {}, memberId = null) {
-  const parts = ["python", "-m", "pib.cli", command, DB_PATH];
+  const cliArgs = ["-m", "pib.cli", command, DB_PATH];
   if (Object.keys(args).length > 0) {
-    parts.push("--json", JSON.stringify(args));
+    cliArgs.push("--json", JSON.stringify(args));
   }
   if (memberId) {
-    parts.push("--member", memberId);
+    cliArgs.push("--member", memberId);
   }
   try {
-    const env = { ...process.env, PIB_CALLER_AGENT: "cos" };
-    const result = execSync(parts.join(" "), {
-      encoding: "utf-8",
-      timeout: 30_000,
-      env,
+    const result = execFileSync("python", cliArgs, {
       cwd: ROOT,
+      env: { ...process.env, PIB_DB_PATH: DB_PATH, PIB_CALLER_AGENT: "cos" },
+      timeout: 30000,
+      encoding: "utf-8",
+      maxBuffer: 1024 * 1024,
     });
     return JSON.parse(result.trim());
   } catch (e) {
@@ -65,6 +66,27 @@ function runCLI(command, args = {}, memberId = null) {
       return { error: "cli_failed", detail: stderr || e.message };
     }
   }
+}
+
+// ═══════════════════════════════════════════════════════════
+// AUDIT LOG + WRITE DB HELPERS
+// ═══════════════════════════════════════════════════════════
+
+function getWriteDB() {
+  const wdb = new Database(DB_PATH);
+  wdb.pragma("journal_mode = WAL");
+  wdb.pragma("busy_timeout = 5000");
+  return wdb;
+}
+
+function auditLog(db, action, detail, memberId) {
+  db.prepare(
+    "INSERT INTO common_audit_log (id, action, detail, actor, created_at) VALUES (?, ?, ?, ?, datetime('now'))"
+  ).run(crypto.randomUUID(), action, detail, memberId || 'console');
+}
+
+function todayET() {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -138,7 +160,7 @@ app.get("/api/today-stream", requireMember, (req, res) => {
   const wnResult = runCLI("what-now", {}, memberId);
 
   // Energy state
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayET();
   const energy = d.prepare(
     "SELECT * FROM pib_energy_states WHERE member_id = ? AND state_date = ?"
   ).get(memberId, today);
@@ -231,7 +253,7 @@ app.get("/api/tasks", optionalMember, (req, res) => {
   const d = getDB();
   const filter = req.query.filter || "all";
   const assignee = req.query.assignee || req.memberId;
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayET();
 
   let sql = "SELECT * FROM ops_tasks WHERE 1=1";
   const params = [];
@@ -257,7 +279,7 @@ app.get("/api/tasks", optionalMember, (req, res) => {
 // --- Schedule ---
 app.get("/api/schedule", requireMember, (req, res) => {
   const d = getDB();
-  const dateStr = req.query.date || new Date().toISOString().slice(0, 10);
+  const dateStr = req.query.date || todayET();
   const memberId = req.memberId;
 
   const events = d.prepare(
@@ -310,7 +332,7 @@ app.get("/api/budget", (_req, res) => {
 // --- Household Status ---
 app.get("/api/household-status", (_req, res) => {
   const d = getDB();
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayET();
   const items = [];
 
   // Member completions
@@ -382,14 +404,13 @@ app.post("/api/lists/:listName/items", requireMember, (req, res) => {
 
 app.post("/api/lists/:listName/items/:id/toggle", requireMember, (_req, res) => {
   const d = getDB();
-  // Direct toggle for list items (simple enough to not need CLI)
   const item = d.prepare("SELECT * FROM ops_lists WHERE id = ?").get(_req.params.id);
   if (!item) return res.status(404).json({ error: "Item not found" });
 
-  // Use a writable connection for this simple toggle
-  const wdb = new Database(DB_PATH);
+  const wdb = getWriteDB();
   wdb.prepare("UPDATE ops_lists SET checked = ?, checked_at = datetime('now') WHERE id = ?")
     .run(item.checked ? 0 : 1, _req.params.id);
+  auditLog(wdb, "list-item-toggle", JSON.stringify({ id: _req.params.id, list: _req.params.listName, checked: !item.checked }), _req.memberId);
   wdb.close();
 
   res.json({ ok: true, done: !item.checked });
@@ -404,10 +425,15 @@ app.post("/api/chat/send", requireMember, (req, res) => {
 });
 
 app.post("/api/approvals/:id/decide", requireMember, (req, res) => {
-  const wdb = new Database(DB_PATH);
+  const decision = req.body.decision;
+  if (!["approved", "rejected"].includes(decision)) {
+    return res.status(400).json({ error: "decision must be 'approved' or 'rejected'" });
+  }
+  const wdb = getWriteDB();
   wdb.prepare(
     "UPDATE mem_approval_queue SET status = ?, decided_by = ?, decided_at = datetime('now') WHERE id = ?"
-  ).run(req.body.decision, req.memberId, req.params.id);
+  ).run(decision, req.memberId, req.params.id);
+  auditLog(wdb, "approval-decide", JSON.stringify({ id: req.params.id, decision }), req.memberId);
   wdb.close();
   res.json({ ok: true });
 });
@@ -470,14 +496,18 @@ app.get("/api/config", (_req, res) => {
 });
 
 app.post("/api/config/:key", requireMember, (req, res) => {
-  const wdb = new Database(DB_PATH);
   const key = req.params.key;
+  if (!/^[a-zA-Z0-9_]+$/.test(key)) {
+    return res.status(400).json({ error: "key must be alphanumeric + underscores only" });
+  }
   const value = req.body.value;
+  const wdb = getWriteDB();
   wdb.prepare(
     "INSERT INTO pib_config (key, value, updated_by) VALUES (?, ?, ?) " +
     "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_by = excluded.updated_by, " +
     "updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')"
   ).run(key, value, req.memberId);
+  auditLog(wdb, "config-set", JSON.stringify({ key, value }), req.memberId);
   wdb.close();
   res.json({ ok: true, key, value });
 });
@@ -515,10 +545,11 @@ app.get("/api/settings/coaching", (_req, res) => {
 });
 
 app.post("/api/settings/coaching/:id/toggle", requireMember, (req, res) => {
-  const wdb = new Database(DB_PATH);
+  const wdb = getWriteDB();
   const proto = wdb.prepare("SELECT active FROM pib_coach_protocols WHERE id = ?").get(req.params.id);
   if (!proto) { wdb.close(); return res.status(404).json({ error: "Protocol not found" }); }
   wdb.prepare("UPDATE pib_coach_protocols SET active = ? WHERE id = ?").run(proto.active ? 0 : 1, req.params.id);
+  auditLog(wdb, "coaching-toggle", JSON.stringify({ id: req.params.id, active: !proto.active }), req.memberId);
   wdb.close();
   res.json({ ok: true, active: !proto.active });
 });
@@ -541,16 +572,19 @@ app.get("/api/settings/household", (_req, res) => {
 });
 
 app.post("/api/settings/household/members", requireMember, (req, res) => {
-  // Add new member — delegate to CLI or direct insert
   const { id, display_name, role } = req.body;
   if (!id || !display_name || !role) {
     return res.status(400).json({ error: "id, display_name, and role are required" });
   }
-  const wdb = new Database(DB_PATH);
+  if (!/^m-[a-z][a-z0-9_-]*$/.test(id)) {
+    return res.status(400).json({ error: "id must match m-{name} pattern (lowercase alphanumeric)" });
+  }
+  const wdb = getWriteDB();
   try {
     wdb.prepare(
       "INSERT INTO common_members (id, display_name, role) VALUES (?, ?, ?)"
     ).run(id, display_name, role);
+    auditLog(wdb, "member-add", JSON.stringify({ id, display_name, role }), req.memberId);
     wdb.close();
     res.json({ ok: true, id });
   } catch (e) {
@@ -560,8 +594,9 @@ app.post("/api/settings/household/members", requireMember, (req, res) => {
 });
 
 app.post("/api/settings/household/members/:id/deactivate", requireMember, (req, res) => {
-  const wdb = new Database(DB_PATH);
+  const wdb = getWriteDB();
   wdb.prepare("UPDATE common_members SET active = 0 WHERE id = ?").run(req.params.id);
+  auditLog(wdb, "member-deactivate", JSON.stringify({ id: req.params.id }), req.memberId);
   wdb.close();
   res.json({ ok: true });
 });
@@ -613,10 +648,7 @@ app.get("/api/chores", optionalMember, (req, res) => {
   res.json({ chores });
 });
 
-app.get("/api/scoreboard", optionalMember, (req, res) => {
-  const result = runCLI("scoreboard-data");
-  res.json(result);
-});
+// (duplicate /api/scoreboard removed — kept the one above near other CLI routes)
 
 // ═══════════════════════════════════════════════════════════
 // CHANNEL REGISTRY & COMMS INBOX

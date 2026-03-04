@@ -14,7 +14,7 @@ ADHD-optimized household Chief-of-Staff system for the Stice-Sclafani family. Ru
 - `BOOTSTRAP_INSTRUCTIONS.md` — Setup guide for OpenClaw deployment.
 - `migrations/001_initial_schema.sql` — Full SQLite DDL (35+ tables).
 - `tests/` — pytest test suite.
-- `archive/` — Deprecated FastAPI/frontend code (reference only, do not import).
+- `archive/` — Deprecated legacy server code (reference only, do not import).
 
 ## Architecture
 - **L0 (Infrastructure):** OpenClaw gateway, cron engine, channel auth, `gog` CLI for Google.

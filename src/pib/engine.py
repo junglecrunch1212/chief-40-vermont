@@ -73,6 +73,9 @@ def can_transition(task: dict, new_status: str, update_data: dict | None = None)
     return True, "ok"
 
 
+ALLOWED_UPDATE_COLUMNS = {"status", "updated_at", "completed_at", "completed_by", "notes", "scheduled_date", "waiting_on", "waiting_since"}
+
+
 async def transition_task(db, task_id: str, new_status: str, update_data: dict, actor: str) -> dict:
     """Transition a task to a new status with guard checks."""
     task = await db.execute_fetchone("SELECT * FROM ops_tasks WHERE id = ?", [task_id])
@@ -98,6 +101,11 @@ async def transition_task(db, task_id: str, new_status: str, update_data: dict, 
     if update_data.get("waiting_on"):
         sets.extend(["waiting_on = ?", "waiting_since = datetime('now')"])
         params.append(update_data["waiting_on"])
+
+    # Validate all columns against whitelist before building SQL
+    for col in sets:
+        col_name = col.split("=")[0].strip()
+        assert col_name in ALLOWED_UPDATE_COLUMNS, f"Disallowed column in task update: {col_name}"
 
     params.append(task_id)
     await db.execute(f"UPDATE ops_tasks SET {', '.join(sets)} WHERE id = ?", params)

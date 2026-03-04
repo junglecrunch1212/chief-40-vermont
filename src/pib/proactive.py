@@ -18,12 +18,28 @@ GUARDRAILS = {
 }
 
 
+def _is_quiet_hours(now_time=None):
+    """Check if current time is in quiet hours (spans midnight: 22:00→07:00).
+
+    Returns True during quiet hours when proactive messages should be suppressed.
+    The OR condition is correct because quiet hours span midnight:
+    - 22:00-23:59 → start <= time is True
+    - 00:00-06:59 → time < end is True
+    - 07:00-21:59 → both False → not quiet
+    """
+    if now_time is None:
+        now_time = now_et().time()
+    start = GUARDRAILS["quiet_hours_start"]
+    end = GUARDRAILS["quiet_hours_end"]
+    return start <= now_time or now_time < end
+
+
 async def can_send_proactive(db, member_id: str, now: datetime | None = None) -> tuple[bool, str]:
     """Check all guardrails before sending a proactive message."""
     now = now or now_et()
 
     # Quiet hours
-    if GUARDRAILS["quiet_hours_start"] <= now.time() or now.time() < GUARDRAILS["quiet_hours_end"]:
+    if _is_quiet_hours(now.time()):
         return False, "quiet_hours"
 
     # Focus mode (auto-expire after 2 hours)

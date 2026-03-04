@@ -44,7 +44,7 @@
 | `src/pib/ingest.py` | 03-03 | 244 | ✅ Prefix parser |
 | `src/pib/voice.py` | 03-03 | 371 | ✅ Voice profiles |
 | `src/pib/comms.py` | 03-03 | 497 | ✅ Batch windows |
-| `src/pib/proactive.py` | 03-03 | 274 | ✅ 11 triggers |
+| `src/pib/proactive.py` | 03-04 | 779 | ✅ 11 triggers + sensor/capture/project triggers |
 | `src/pib/extraction.py` | 03-01 | 151 | ✅ Comms enrichment |
 | `src/pib/db.py` | 03-03 | 250 | ✅ SQLite connection |
 | `src/pib/cost.py` | 03-01 | 32 | ✅ API cost tracking |

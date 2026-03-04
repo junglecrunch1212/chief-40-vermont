@@ -119,7 +119,8 @@ async def apply_migrations(db: aiosqlite.Connection, migrations_dir: str | None 
         if version <= current_version:
             continue
 
-        content = open(f).read()
+        with open(f) as fh:
+            content = fh.read()
         parts = content.split("-- DOWN")
         up_sql = parts[0].strip()
         down_sql = parts[1].strip() if len(parts) > 1 else "-- no rollback defined"

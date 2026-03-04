@@ -59,16 +59,32 @@ class TestPrivilegedTitleNeverInContext:
         assert "Family Dinner" in context
 
     async def test_privileged_shows_redacted_title(self, db_with_privileged_events):
-        context = await build_calendar_context(
+        """Laura-only events are invisible to James; Laura sees redacted title."""
+        # James can't see Laura-only events
+        ctx_james = await build_calendar_context(
             db_with_privileged_events, "2026-03-01", "2026-03-07", "m-james"
         )
-        assert "Laura - Meeting" in context
+        assert "Laura - Meeting" not in ctx_james
+
+        # Laura sees her own event with redacted title
+        ctx_laura = await build_calendar_context(
+            db_with_privileged_events, "2026-03-01", "2026-03-07", "m-laura"
+        )
+        assert "Laura - Meeting" in ctx_laura
 
     async def test_redacted_shows_unavailable(self, db_with_privileged_events):
-        context = await build_calendar_context(
+        """Laura-only redacted events are invisible to James; Laura sees [unavailable]."""
+        # James can't see Laura-only events
+        ctx_james = await build_calendar_context(
             db_with_privileged_events, "2026-03-01", "2026-03-07", "m-james"
         )
-        assert "unavailable" in context
+        assert "unavailable" not in ctx_james
+
+        # Laura sees her redacted event
+        ctx_laura = await build_calendar_context(
+            db_with_privileged_events, "2026-03-01", "2026-03-07", "m-laura"
+        )
+        assert "unavailable" in ctx_laura
 
 
 class TestCanaryNeverInAnyOutput:

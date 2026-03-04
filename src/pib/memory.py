@@ -108,11 +108,15 @@ def has_value_change(new_content: str, existing_content: str) -> bool:
 async def save_memory_deduped(
     db, content: str, category: str, domain: str, member_id: str, source: str
 ) -> dict:
-    """Save memory with dedup: reinforce if similar, supersede if contradicted, insert if new."""
+    """Save memory with dedup: reinforce if similar, supersede if contradicted, insert if new.
+
+    Dedup is scoped to the same member to prevent cross-member interference.
+    """
     existing = await db.execute_fetchall(
         "SELECT id, content, reinforcement_count FROM mem_long_term "
-        "WHERE category = ? AND (domain = ? OR domain IS NULL) AND superseded_by IS NULL",
-        [category, domain],
+        "WHERE category = ? AND (domain = ? OR domain IS NULL) "
+        "AND member_id = ? AND superseded_by IS NULL",
+        [category, domain, member_id],
     )
 
     for row in existing:
@@ -206,13 +210,13 @@ async def auto_promote_session_facts(db) -> dict:
             if keyword in content_lower:
                 confidence = min(confidence + 0.1, 1.0)
 
-        # Check for similar facts using SequenceMatcher instead of LIKE
-        # (avoids false positives on short content)
+        # Check for similar facts from the same member using SequenceMatcher
+        # (avoids false positives on short content and cross-member contamination)
         from difflib import SequenceMatcher
         similar_rows = await db.execute_fetchall(
             "SELECT content FROM mem_session_facts "
-            "WHERE fact_type = ? AND id != ?",
-            [fact["fact_type"], fact["id"]],
+            "WHERE fact_type = ? AND id != ? AND member_id = ?",
+            [fact["fact_type"], fact["id"], fact["member_id"]],
         )
         similar_found = 0
         for sr in (similar_rows or []):
@@ -247,25 +251,45 @@ def _sanitize_fts5_query(query: str) -> str:
     return " ".join(words)
 
 
-async def search_memory(db, query: str, limit: int = 10) -> list[dict]:
-    """Search long-term memory via FTS5."""
+async def search_memory(db, query: str, limit: int = 10, member_id: str | None = None) -> list[dict]:
+    """Search long-term memory via FTS5, scoped to a member.
+
+    When member_id is provided, only returns memories belonging to that member
+    or household-shared memories (member_id IS NULL).
+    """
     safe_query = _sanitize_fts5_query(query)
     if not safe_query:
         return []
+
+    member_clause = ""
+    params: list = [safe_query]
+    if member_id:
+        member_clause = " AND (lt.member_id = ? OR lt.member_id IS NULL)"
+        params.append(member_id)
+    params.append(limit)
+
     try:
         rows = await db.execute_fetchall(
             "SELECT lt.*, rank FROM mem_long_term_fts fts "
             "JOIN mem_long_term lt ON lt.id = fts.rowid "
-            "WHERE mem_long_term_fts MATCH ? AND lt.superseded_by IS NULL "
+            "WHERE mem_long_term_fts MATCH ? AND lt.superseded_by IS NULL"
+            f"{member_clause} "
             "ORDER BY rank LIMIT ?",
-            [safe_query, limit],
+            params,
         )
         return [dict(r) for r in rows] if rows else []
     except Exception:
         # FTS5 content sync may not be set up — fall back to LIKE search
+        like_params: list = [f"%{safe_query}%"]
+        like_member = ""
+        if member_id:
+            like_member = " AND (member_id = ? OR member_id IS NULL)"
+            like_params.append(member_id)
+        like_params.append(limit)
         rows = await db.execute_fetchall(
-            "SELECT * FROM mem_long_term WHERE content LIKE ? AND superseded_by IS NULL "
+            "SELECT * FROM mem_long_term WHERE content LIKE ? AND superseded_by IS NULL"
+            f"{like_member} "
             "ORDER BY created_at DESC LIMIT ?",
-            [f"%{safe_query}%", limit],
+            like_params,
         )
         return [dict(r) for r in rows] if rows else []

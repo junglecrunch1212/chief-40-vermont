@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Poopsy-In-A-Box v5</title>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=DM+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:#FFFBF5; --bg-card:#FFFFFF; --bg-side:#FAF5F0; --bg-input:#F5F0EA; --bg-hover:#F0EBE4;
+  --tx:#2D2926; --tx2:#6B5E54; --tx3:#9B8E82; --tx4:#C4B8AC;
+  --bd:#E8E0D6; --bd2:#D4C9BC;
+  --pink:#E8A0BF; --pink-bg:rgba(232,160,191,0.12); --pink-bg2:rgba(232,160,191,0.06);
+  --lav:#B8A9C9; --lav-bg:rgba(184,169,201,0.12);
+  --teal:#8EC5C0; --teal-bg:rgba(142,197,192,0.10);
+  --grn:#7CB98F; --grn-bg:rgba(124,185,143,0.12);
+  --warn:#E8C07D; --warn-bg:rgba(232,192,125,0.12);
+  --err:#D4756B; --err-bg:rgba(212,117,107,0.10);
+  --info:#89B4D4; --info-bg:rgba(137,180,212,0.10);
+  --r:12px; --rs:8px;
+  --sh:0 2px 8px rgba(45,41,38,0.06); --shc:0 4px 16px rgba(45,41,38,0.05);
+  --head:'Fraunces',Georgia,serif; --body:'DM Sans',-apple-system,sans-serif; --mono:'JetBrains Mono',monospace;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--tx);font-family:var(--body);-webkit-font-smoothing:antialiased;font-size:14px;line-height:1.5}
+@keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+.fi{animation:fadeUp .4s ease-out}
+.card{background:var(--bg-card);border:1px solid var(--bd);border-radius:var(--r);padding:20px;box-shadow:var(--shc);transition:border-color .2s}
+.card:hover{border-color:var(--bd2)}
+.card-flat{background:var(--bg-card);border:1px solid var(--bd);border-radius:var(--r);padding:20px}
+input,textarea,select{background:var(--bg-input);border:1px solid var(--bd);border-radius:var(--rs);color:var(--tx);font-family:var(--body);font-size:14px;padding:10px 14px;outline:none;width:100%;transition:border-color .2s}
+input:focus,select:focus,textarea:focus{border-color:var(--pink);box-shadow:0 0 0 3px rgba(232,160,191,0.15)}
+button{font-family:var(--body);cursor:pointer;border:none;border-radius:var(--rs);font-size:14px;font-weight:500;padding:10px 18px;transition:all .15s ease}
+.btn-p{background:var(--pink);color:#fff}.btn-p:hover{background:#D990B0;transform:translateY(-1px);box-shadow:0 4px 12px rgba(232,160,191,0.3)}
+.btn-s{background:transparent;color:var(--tx2);border:1px solid var(--bd)}.btn-s:hover{border-color:var(--bd2);background:var(--bg-hover)}
+.btn-g{background:var(--grn);color:#fff}.btn-g:hover{background:#6DAA80}
+.btn-d{background:var(--err-bg);color:var(--err)}.btn-d:hover{background:rgba(212,117,107,0.18)}
+.btn-sm{padding:6px 14px;font-size:13px}
+.badge{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:600;letter-spacing:.3px;padding:4px 10px;border-radius:20px}
+.badge-pink{background:var(--pink-bg);color:var(--pink)}
+.badge-lav{background:var(--lav-bg);color:var(--lav)}
+.badge-grn{background:var(--grn-bg);color:var(--grn)}
+.badge-warn{background:var(--warn-bg);color:#B8943D}
+.badge-err{background:var(--err-bg);color:var(--err)}
+.badge-info{background:var(--info-bg);color:var(--info)}
+.badge-teal{background:var(--teal-bg);color:#5DA09A}
+.shell{display:flex;height:100vh;overflow:hidden}
+.sidebar{width:220px;min-width:220px;background:var(--bg-side);border-right:1px solid var(--bd);display:flex;flex-direction:column;padding:20px 0}
+.main{flex:1;overflow:auto;padding:28px 36px;background:var(--bg)}
+.nav-btn{display:flex;align-items:center;justify-content:space-between;width:100%;padding:10px 14px;margin-bottom:2px;border-radius:10px;background:transparent;color:var(--tx2);border:none;font-size:14px;font-weight:400;transition:all .15s;text-align:left}
+.nav-btn.active{background:var(--pink-bg);color:#C47A9E;font-weight:600}
+.nav-btn:hover:not(.active){background:var(--bg-hover)}
+.nav-icon{display:flex;align-items:center;gap:12px}
+.actor-btn{flex:1;padding:8px 4px;border-radius:8px;border:1px solid var(--bd);background:transparent;font-size:12px;color:var(--tx2);display:flex;flex-direction:column;align-items:center;gap:2px;transition:all .15s}
+.actor-btn.active{border-color:var(--pink);background:var(--pink-bg);color:var(--pink);font-weight:600}
+.pill-tabs{display:flex;gap:4px;margin-bottom:20px;overflow-x:auto;padding-bottom:4px}
+.pill{padding:7px 16px;border-radius:20px;font-size:13px;font-weight:500;background:var(--bg-card);color:var(--tx2);border:1px solid var(--bd);cursor:pointer;white-space:nowrap;transition:all .15s}
+.pill.active{background:var(--pink);color:#fff;border-color:var(--pink)}
+table{width:100%;border-collapse:collapse}
+th{text-align:left;padding:10px 14px;font-size:11px;font-weight:600;color:var(--tx3);text-transform:uppercase;letter-spacing:.3px}
+td{padding:12px 14px}
+thead tr{border-bottom:2px solid var(--bd)}
+tbody tr{border-bottom:1px solid var(--bd);transition:background .15s}
+tbody tr:hover{background:var(--bg-hover)}
+.page-title{font-size:28px;font-weight:600;font-family:var(--head);letter-spacing:-.5px;margin-bottom:24px}
+.section-label{font-size:11px;font-weight:600;color:var(--tx3);letter-spacing:.5px;text-transform:uppercase;margin-bottom:12px}
+.spinner{width:32px;height:32px;border-radius:50%;border:3px solid var(--bd);border-top-color:var(--pink);animation:pulse 1s infinite;margin:60px auto}
+::-webkit-scrollbar{width:6px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--bd);border-radius:3px}
+</style>
+</head>
+<body>
+<div class="shell">
+  <nav class="sidebar" id="sidebar"></nav>
+  <main class="main" id="main"></main>
+</div>
+<script>
+// ── State ──
+const MEMBERS = [
+  { id:'m-james', name:'James', role:'parent', emoji:'\uD83D\uDCAA' },
+  { id:'m-laura', name:'Laura', role:'parent', emoji:'\u2696\uFE0F' },
+  { id:'m-charlie', name:'Charlie', role:'child', emoji:'\uD83C\uDF1F', age:6 },
+];
+const NAV = [
+  { id:'today', icon:'sun', label:'Today' },
+  { id:'tasks', icon:'check-square', label:'Tasks' },
+  { id:'schedule', icon:'calendar', label:'Schedule' },
+  { id:'lists', icon:'list', label:'Lists' },
+  { id:'chat', icon:'message-circle', label:'Chat' },
+  { id:'scoreboard', icon:'trophy', label:'Scoreboard' },
+  { id:'people', icon:'users', label:'People' },
+  { id:'settings', icon:'settings', label:'Settings' },
+];
+const HIDDEN_FOR_CHILD = ['tasks','people','settings'];
+const DOMAIN_BADGE = {household:'badge-lav',health:'badge-teal',finance:'badge-warn',family:'badge-pink',work:'badge-info',admin:'badge-grn'};
+const SETTINGS_TABS = ['health','costs','models','sources','phases','config','budget','household','permissions','coaching','gates','memory'];
+const SETTINGS_LABELS = {health:'System Health',costs:'Costs',models:'AI Models',sources:'Sources',phases:'Life Phases',config:'Config',budget:'Budget',household:'Household',permissions:'Permissions',coaching:'Coaching',gates:'Gates',memory:'Memory'};
+
+let currentPage = 'today';
+let currentActor = localStorage.getItem('pib-actor') || 'm-james';
+let settingsTab = 'health';
+let chatSessionId = 'sess-' + Date.now();
+let chatMessages = [];
+let chatStreaming = false;
+
+// ── API Layer ──
+async function api(path, opts = {}) {
+  const res = await fetch(path, {
+    headers: { 'Content-Type':'application/json', 'X-PIB-Member': currentActor, ...opts.headers },
+    ...opts,
+  });
+  if (!res.ok) throw new Error(`API ${res.status}`);
+  return res.json();
+}
+const GET = (p) => api(p);
+const POST = (p, body) => api(p, { method:'POST', body: JSON.stringify(body) });
+
+// ── SVG Icons ──
+const ICONS = {
+  sun:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>',
+  'check-square':'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>',
+  calendar:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',
+  list:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>',
+  'message-circle':'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
+  trophy:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>',
+  users:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
+  settings:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
+};
+
+// ── Helpers ──
+function esc(s) { const d=document.createElement('div'); d.textContent=s||''; return d.innerHTML; }
+function memberName(id) { return MEMBERS.find(m=>m.id===id)?.name || '\u2014'; }
+function todayISO() { return new Date().toISOString().split('T')[0]; }
+function greeting() { return new Date().getHours()<12?'Good morning':'Good afternoon'; }
+function loading(label) { return `<div style="text-align:center;padding:60px"><div class="spinner"></div>${label?`<div style="margin-top:12px;font-size:13px;color:var(--tx3)">${esc(label)}</div>`:''}</div>`; }
+
+// ── Render Sidebar ──
+function renderSidebar() {
+  const actor = MEMBERS.find(m=>m.id===currentActor);
+  let h = `
+    <div style="padding:0 20px 20px;border-bottom:1px solid var(--bd);margin-bottom:12px">
+      <div style="display:flex;align-items:center;gap:12px">
+        <div style="width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,var(--pink),var(--lav));display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:700;color:#fff;box-shadow:0 2px 8px rgba(232,160,191,0.3)">P</div>
+        <div><div style="font-size:17px;font-weight:700;font-family:var(--head);letter-spacing:-.3px">Poopsy</div><div style="font-size:10px;color:var(--tx3);font-weight:500;letter-spacing:.5px">IN-A-BOX &middot; v5</div></div>
+      </div>
+    </div>
+    <div style="padding:8px 12px 16px">
+      <div style="font-size:10px;color:var(--tx3);font-weight:600;letter-spacing:.5px;text-transform:uppercase;margin-bottom:8px;padding-left:8px">Viewing as</div>
+      <div style="display:flex;gap:4px">
+        ${MEMBERS.map(m=>`<button class="actor-btn ${m.id===currentActor?'active':''}" onclick="switchActor('${m.id}')"><span style="font-size:16px">${m.emoji}</span>${m.name}</button>`).join('')}
+      </div>
+    </div>
+    <div style="flex:1;padding:0 10px;overflow:auto">`;
+  for (const n of NAV) {
+    if (currentActor==='m-charlie' && HIDDEN_FOR_CHILD.includes(n.id)) continue;
+    h += `<button class="nav-btn ${n.id===currentPage?'active':''}" onclick="navigate('${n.id}')">
+      <span class="nav-icon">${ICONS[n.icon]||''}${n.label}</span>
+    </button>`;
+  }
+  h += `</div>
+    <div style="padding:0 12px 8px">
+      <div id="health-pill" style="display:flex;align-items:center;gap:8px;padding:10px 14px;border-radius:10px;background:var(--grn-bg)">
+        <div style="width:7px;height:7px;border-radius:50%;background:var(--grn);animation:pulse 2s infinite"></div>
+        <span style="font-size:12px;color:var(--grn);font-weight:500">System Healthy</span>
+      </div>
+    </div>`;
+  document.getElementById('sidebar').innerHTML = h;
+}
+
+function switchActor(id) { currentActor=id; localStorage.setItem('pib-actor',id); renderSidebar(); renderPage(); }
+function navigate(page) { currentPage=page; if(currentActor==='m-charlie'&&HIDDEN_FOR_CHILD.includes(page)) currentPage='today'; renderSidebar(); renderPage(); }
+
+// ── Page Router ──
+function renderPage() {
+  const m = document.getElementById('main');
+  m.innerHTML = loading('Loading...');
+  const pages = {today:renderToday,tasks:renderTasks,schedule:renderSchedule,lists:renderLists,chat:renderChat,scoreboard:renderScoreboard,people:renderPeople,settings:renderSettings};
+  (pages[currentPage]||renderToday)();
+}
+
+// ── TODAY ──
+async function renderToday() {
+  const m = document.getElementById('main');
+  try {
+    const data = await GET(`/api/today-stream?member=${currentActor}`);
+    const stream = data.stream||[];
+    const energy = data.energy||{level:'medium',meds:false,sleep:'okay',completions:0,cap:15};
+    const streak = data.streak||{current:0,best:0};
+    const name = memberName(currentActor);
+    const doneCount = stream.filter(s=>s.state==='done'&&s.type!=='endowed').length;
+    m.innerHTML = `<div class="fi" style="max-width:640px;margin:0 auto">
+      <div style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap">
+        <div style="padding:8px 14px;background:var(--bg-card);border:1px solid var(--bd);border-radius:10px;display:flex;align-items:center;gap:8px"><span style="font-size:13px;font-weight:600;color:${energy.meds?'var(--grn)':'var(--warn)'}">${energy.meds?'Yes':'Not yet'}</span><span style="font-size:10px;color:var(--tx3);text-transform:uppercase;letter-spacing:.3px">Meds</span></div>
+        <div style="padding:8px 14px;background:var(--bg-card);border:1px solid var(--bd);border-radius:10px;display:flex;align-items:center;gap:8px"><span style="font-size:13px;font-weight:600">${esc(energy.level)}</span><span style="font-size:10px;color:var(--tx3);text-transform:uppercase;letter-spacing:.3px">Energy</span></div>
+        <div style="padding:8px 14px;background:var(--bg-card);border:1px solid var(--bd);border-radius:10px;display:flex;align-items:center;gap:8px"><span style="font-size:13px;font-weight:600">${doneCount}/${energy.cap||15}</span><span style="font-size:10px;color:var(--tx3);text-transform:uppercase;letter-spacing:.3px">Done</span></div>
+      </div>
+      <h1 style="font-size:28px;font-weight:600;font-family:var(--head);letter-spacing:-.5px;line-height:1.2">${greeting()}, ${esc(name)}</h1>
+      <p style="font-size:15px;color:var(--tx2);margin-top:6px">${doneCount} tasks done.${data.summary?' '+esc(data.summary):''}</p>
+      <div style="display:flex;gap:8px;margin:10px 0 24px"><span class="badge badge-pink">${streak.current}-day streak</span><span class="badge badge-lav">${doneCount}/${energy.cap||15} velocity</span></div>
+      <div style="display:grid;gap:10px">
+        ${stream.filter(s=>s.state==='pending'||s.state==='current').map(s=>`
+          <div class="card" style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px">
+            <div>
+              <div style="font-weight:500;font-size:15px">${esc(s.label||s.title||'')}</div>
+              <div style="font-size:12px;color:var(--tx3);margin-top:2px">${s.type==='calendar'?(s.time||''):(s.domain||'')}</div>
+            </div>
+            ${s.type==='task'&&s.id?`<button class="btn-p btn-sm" onclick="completeFromStream('${esc(s.task?.id||s.id)}')">Done</button>`:''}
+          </div>`).join('')}
+      </div>
+    </div>`;
+  } catch(e) { m.innerHTML = `<div class="fi"><h1 class="page-title">${greeting()}, ${esc(memberName(currentActor))}</h1><div class="card-flat" style="text-align:center;padding:48px;color:var(--tx3)">Could not load today stream. Backend may be starting up.</div></div>`; }
+}
+async function completeFromStream(taskId) {
+  try { await POST(`/api/tasks/${taskId}/complete`, {member:currentActor}); renderToday(); } catch(e) { console.error(e); }
+}
+
+// ── TASKS ──
+async function renderTasks() {
+  const m = document.getElementById('main');
+  const filters = ['all','mine','inbox','overdue','waiting','done'];
+  let filter = 'all';
+  async function load(f) {
+    filter = f||filter;
+    try {
+      const data = await GET(`/api/tasks?filter=${filter}&assignee=${currentActor}`);
+      const tasks = data.tasks||[];
+      m.innerHTML = `<div class="fi">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px">
+          <h1 class="page-title" style="margin-bottom:0">Tasks</h1><button class="btn-p">+ Capture</button>
+        </div>
+        <div class="pill-tabs">${filters.map(f2=>`<button class="pill ${f2===filter?'active':''}" onclick="window._taskFilter('${f2}')">${f2}</button>`).join('')}</div>
+        <div class="card-flat" style="padding:0;overflow:hidden">
+          <table><thead><tr>${['Score','Status','Task','Due','Domain','Owner','Effort'].map(h=>`<th>${h}</th>`).join('')}</tr></thead>
+          <tbody>${tasks.map(t=>`<tr>
+            <td style="font-family:var(--mono);font-size:12px;color:var(--tx3)">${t.score??''}</td>
+            <td><span class="badge ${t.status==='done'?'badge-grn':t.status==='inbox'?'badge-warn':t.status==='waiting'?'badge-lav':'badge-info'}">${esc(t.status)}</span></td>
+            <td><div style="font-weight:500">${esc(t.title)}</div><div style="font-size:11px;color:var(--tx3);font-family:var(--mono)">${esc(t.id)}</div></td>
+            <td style="font-size:13px;color:var(--tx2)">${esc(t.due||'\u2014')}</td>
+            <td><span class="badge ${DOMAIN_BADGE[t.domain]||'badge-info'}">${esc(t.domain||'')}</span></td>
+            <td style="font-size:13px;color:var(--tx2)">${esc(memberName(t.assignee))}</td>
+            <td style="font-size:13px;color:var(--tx3)">${esc(t.effort||'')}</td>
+          </tr>`).join('')}</tbody></table>
+        </div></div>`;
+    } catch(e) { m.innerHTML = `<div class="fi"><h1 class="page-title">Tasks</h1><div class="card-flat" style="text-align:center;padding:48px;color:var(--tx3)">Could not load tasks.</div></div>`; }
+  }
+  window._taskFilter = load;
+  load(filter);
+}
+
+// ── SCHEDULE ──
+async function renderSchedule() {
+  const m = document.getElementById('main');
+  try {
+    const data = await GET(`/api/schedule?date=${todayISO()}`);
+    const events = data.events||[];
+    const hours = Array.from({length:15},(_,i)=>i+7);
+    const cols = [{id:'m-james',name:'James',color:'var(--pink)'},{id:'m-laura',name:'Laura',color:'var(--lav)'},{id:'all',name:'Family',color:'var(--teal)'}];
+    const dateStr = new Date().toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'});
+    m.innerHTML = `<div class="fi">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px">
+        <div><h1 class="page-title" style="margin-bottom:0">Schedule</h1><p style="font-size:14px;color:var(--tx2);margin-top:4px">${dateStr}</p></div>
+      </div>
+      ${data.custody?`<div style="padding:10px 16px;border-radius:10px;background:var(--lav-bg);margin-bottom:20px;font-size:13px;color:var(--lav);font-weight:500">${esc(data.custody)}</div>`:''}
+      <div class="card-flat" style="padding:0;overflow:hidden">
+        <div style="display:grid;grid-template-columns:60px repeat(3,1fr);border-bottom:2px solid var(--bd)">
+          <div style="padding:12px 8px;font-size:11px;font-weight:600;color:var(--tx3);text-align:center">TIME</div>
+          ${cols.map(c=>`<div style="padding:12px 14px;font-size:12px;font-weight:600;color:${c.color};text-align:center;text-transform:uppercase;letter-spacing:.3px">${c.name}</div>`).join('')}
+        </div>
+        ${hours.map(h=>`<div style="display:grid;grid-template-columns:60px repeat(3,1fr);min-height:48px;border-bottom:1px solid var(--bg-input)">
+          <div style="padding:4px 8px;font-size:11px;font-family:var(--mono);color:var(--tx4);text-align:center">${h>12?h-12:h}${h>=12?'pm':'am'}</div>
+          ${cols.map(mc=>{
+            const ev=events.find(s=>parseInt((s.time||'').split(':')[0])===h&&(s.member===mc.id||s.member==='all'));
+            if(!ev) return '<div></div>';
+            return `<div style="padding:4px 6px"><div style="padding:8px 12px;border-radius:8px;font-size:13px;font-weight:500;background:${mc.color}18;border-left:3px solid ${mc.color}"><div>${esc(ev.title)}</div><div style="font-size:11px;color:var(--tx3);margin-top:2px">${esc(ev.time||'')}\u2013${esc(ev.end||'')}</div></div></div>`;
+          }).join('')}
+        </div>`).join('')}
+      </div></div>`;
+  } catch(e) { m.innerHTML = `<div class="fi"><h1 class="page-title">Schedule</h1><div class="card-flat" style="text-align:center;padding:48px;color:var(--tx3)">Could not load schedule.</div></div>`; }
+}
+
+// ── LISTS ──
+async function renderLists() {
+  const m = document.getElementById('main');
+  let listTab = 'grocery';
+  const tabDefs = [{id:'grocery',label:'Grocery'},{id:'honey-do',label:'Honey-Do'},{id:'packing',label:'Baby Packing'}];
+  async function load(t) {
+    listTab = t||listTab;
+    try {
+      const data = await GET(`/api/lists/${listTab}`);
+      const items = data.items||[];
+      m.innerHTML = `<div class="fi" style="max-width:600px;margin:0 auto">
+        <h1 class="page-title">Lists</h1>
+        <div class="pill-tabs">${tabDefs.map(td=>`<button class="pill ${td.id===listTab?'active':''}" onclick="window._listTab('${td.id}')">${td.label}</button>`).join('')}</div>
+        <div style="display:flex;gap:8px;margin-bottom:20px">
+          <input id="list-input" placeholder="Quick add..." onkeydown="if(event.key==='Enter')window._listAdd()">
+          <button class="btn-p" onclick="window._listAdd()" style="min-width:70px">Add</button>
+        </div>
+        <div class="card-flat" style="padding:0">
+          ${items.map((item,i)=>`<div onclick="window._listToggle('${esc(item.id)}')" style="display:flex;align-items:center;gap:14px;padding:14px 20px;border-bottom:${i<items.length-1?'1px solid var(--bd)':'none'};cursor:pointer">
+            <div style="width:22px;height:22px;border-radius:6px;border:2px solid ${item.done?'var(--grn)':'var(--bd)'};background:${item.done?'var(--grn)':'transparent'};display:flex;align-items:center;justify-content:center;flex-shrink:0">${item.done?'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>':''}</div>
+            <span style="font-size:15px;text-decoration:${item.done?'line-through':'none'};color:${item.done?'var(--tx3)':'var(--tx)'}">${esc(item.text)}</span>
+          </div>`).join('')}
+        </div></div>`;
+    } catch(e) { m.innerHTML = `<div class="fi"><h1 class="page-title">Lists</h1><div class="card-flat" style="text-align:center;padding:48px;color:var(--tx3)">Could not load list.</div></div>`; }
+  }
+  window._listTab = load;
+  window._listAdd = async()=>{ const inp=document.getElementById('list-input'); if(!inp||!inp.value.trim()) return; try{ await POST(`/api/lists/${listTab}/items`,{text:inp.value}); load(listTab); }catch(e){console.error(e);} };
+  window._listToggle = async(id)=>{ try{ await POST(`/api/lists/${listTab}/items/${id}/toggle`,{}); load(listTab); }catch(e){console.error(e);} };
+  load(listTab);
+}
+
+// ── CHAT ──
+function renderChat() {
+  const m = document.getElementById('main');
+  const chips = ['today','now','grocery list','schedule','status','diff','help'];
+  function draw() {
+    m.innerHTML = `<div class="fi" style="display:flex;flex-direction:column;height:calc(100vh - 56px);max-width:700px;margin:0 auto">
+      <h1 class="page-title" style="flex-shrink:0">Chat with Poopsy</h1>
+      <div id="chat-msgs" style="flex:1;overflow:auto;margin-bottom:12px;display:flex;flex-direction:column;gap:10px">
+        ${chatMessages.map((msg,i)=>`<div style="display:flex;justify-content:${msg.role==='user'?'flex-end':'flex-start'}">
+          <div style="max-width:80%;padding:12px 16px;border-radius:16px;font-size:15px;line-height:1.5;background:${msg.role==='user'?'var(--pink)':'var(--bg-card)'};color:${msg.role==='user'?'#fff':'var(--tx)'};border:${msg.role==='user'?'none':'1px solid var(--bd)'};border-bottom-right-radius:${msg.role==='user'?'4px':'16px'};border-bottom-left-radius:${msg.role==='user'?'16px':'4px'};box-shadow:${msg.role==='user'?'0 2px 8px rgba(232,160,191,0.3)':'var(--sh)'}">
+            ${esc(msg.content)}${chatStreaming&&i===chatMessages.length-1&&msg.role==='assistant'?'<span style="animation:pulse 1s infinite">\u258C</span>':''}
+            <div style="font-size:10px;margin-top:6px;opacity:.6">${esc(msg.ts||'')}</div>
+          </div></div>`).join('')}
+      </div>
+      <div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;flex-shrink:0">
+        ${chips.map(c=>`<button class="btn-s" style="padding:5px 14px;font-size:12px;border-radius:20px" onclick="window._chatSend('${esc(c)}')" ${chatStreaming?'disabled':''}>${c}</button>`).join('')}
+      </div>
+      <div style="display:flex;gap:10px;flex-shrink:0;padding-bottom:8px">
+        <input id="chat-input" placeholder="Talk to Poopsy..." style="font-size:15px;padding:14px 18px;border-radius:28px;flex:1" ${chatStreaming?'disabled':''} onkeydown="if(event.key==='Enter')window._chatSend()">
+        <button class="btn-p" style="width:48px;height:48px;border-radius:50%;display:flex;align-items:center;justify-content:center;padding:0" onclick="window._chatSend()" ${chatStreaming?'disabled':''}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+        </button>
+      </div></div>`;
+    const el = document.getElementById('chat-msgs');
+    if(el) el.scrollTop = el.scrollHeight;
+  }
+  window._chatSend = async function(text) {
+    const inp = document.getElementById('chat-input');
+    const t = text || (inp?inp.value:'');
+    if (!t.trim() || chatStreaming) return;
+    const ts = new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
+    chatMessages.push({role:'user',content:t,ts});
+    if(inp) inp.value='';
+    chatStreaming = true;
+    draw();
+    try {
+      const res = await POST('/api/chat/send',{message:t,session_id:chatSessionId});
+      chatMessages.push({role:'assistant',content:res.reply||res.content||'(no response)',ts:new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'})});
+    } catch(e) {
+      chatMessages.push({role:'assistant',content:'Connection lost. Try again.',ts});
+    }
+    chatStreaming = false;
+    draw();
+  };
+  draw();
+}
+
+// ── SCOREBOARD ──
+async function renderScoreboard() {
+  const m = document.getElementById('main');
+  try {
+    const data = await GET('/api/scoreboard');
+    const cards = data.cards||[];
+    const layers = data.layers||[];
+    const rewardHistory = data.rewardHistory||[];
+    m.innerHTML = `<div class="fi">
+      <h1 class="page-title">Scoreboard</h1>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:24px">
+        ${cards.map(c=>`<div class="card" style="text-align:center;padding:24px">
+          <div style="font-size:36px;margin-bottom:6px">${c.emoji||''}</div>
+          <div style="font-size:20px;font-weight:700;font-family:var(--head)">${esc(c.name)}</div>
+          <div style="display:flex;justify-content:center;align-items:center;gap:6px;margin:12px 0">
+            <span style="font-size:22px;font-weight:700;color:var(--pink)">${c.streak?.current??0}</span>
+            <span style="font-size:13px;color:var(--tx3)">day streak</span>
+          </div>
+          <div style="font-size:32px;font-weight:700;color:var(--grn)">${c.done??0}</div>
+          <div style="font-size:13px;color:var(--tx3)">done today</div>
+          <div style="margin-top:10px;font-size:12px;color:var(--tx4)">Week: ${c.wk??0} pts &middot; Best: ${c.streak?.best??0} days</div>
+        </div>`).join('')}
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+        <div class="card-flat">
+          <div class="section-label">Neuroprosthetic Layers</div>
+          <div style="text-align:center;margin-bottom:16px"><div style="font-size:36px;font-weight:700;color:var(--pink);font-family:var(--head)">${data.overallScore??0}</div><div style="font-size:12px;color:var(--tx3)">/ 100 overall</div></div>
+          ${layers.map(l=>`<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+            <span style="font-size:12px;color:var(--tx2);min-width:70px">${esc(l.name)}</span>
+            <div style="flex:1;height:6px;background:var(--bg-input);border-radius:3px;overflow:hidden"><div style="height:100%;width:${l.score}%;background:${l.score>40?'var(--grn)':l.score>20?'var(--warn)':'var(--err)'};border-radius:3px"></div></div>
+            <span style="font-size:11px;font-family:var(--mono);color:var(--tx3);min-width:24px">${l.score}</span>
+          </div>`).join('')}
+        </div>
+        <div class="card-flat">
+          <div class="section-label">Recent Rewards</div>
+          ${rewardHistory.map((r,i)=>`<div style="display:flex;align-items:center;gap:10px;padding:8px 0;${i?'border-top:1px solid var(--bd)':''}">
+            <div style="width:8px;height:8px;border-radius:50%;background:${r.tier==='jackpot'?'var(--pink)':r.tier==='delight'?'var(--lav)':r.tier==='warm'?'var(--teal)':'var(--tx3)'};flex-shrink:0"></div>
+            <span style="font-size:13px;color:var(--tx2);flex:1">${esc(r.msg)}</span>
+            <span style="font-size:11px;color:var(--tx4);font-family:var(--mono)">${esc(r.ts||'')}</span>
+          </div>`).join('')}
+        </div>
+      </div></div>`;
+  } catch(e) { m.innerHTML = `<div class="fi"><h1 class="page-title">Scoreboard</h1><div class="card-flat" style="text-align:center;padding:48px;color:var(--tx3)">Could not load scoreboard.</div></div>`; }
+}
+
+// ── PEOPLE ──
+async function renderPeople() {
+  const m = document.getElementById('main');
+  let tab = 'contacts';
+  async function load(t) {
+    tab = t||tab;
+    m.innerHTML = loading('Loading people...');
+    try {
+      if (tab==='contacts') {
+        const data = await GET('/api/people/contacts');
+        const contacts = data.contacts||[];
+        m.innerHTML = `<div class="fi"><h1 class="page-title">People</h1>
+          <div class="pill-tabs">${['contacts','comms','observations','autonomy'].map(t2=>`<button class="pill ${t2===tab?'active':''}" onclick="window._peopleTab('${t2}')">${t2}</button>`).join('')}</div>
+          <div class="card-flat" style="margin-bottom:16px"><div class="section-label">Household</div>
+            ${MEMBERS.map(mb=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-top:1px solid var(--bd)">
+              <div style="display:flex;align-items:center;gap:12px"><span style="font-size:24px">${mb.emoji}</span><div><div style="font-weight:500">${mb.name}</div><div style="font-size:12px;color:var(--tx3)">${mb.role}${mb.age?' &middot; age '+mb.age:''}</div></div></div>
+              <span class="badge ${mb.role==='parent'?'badge-pink':'badge-lav'}">${mb.role}</span>
+            </div>`).join('')}
+          </div>
+          <div class="card-flat"><div class="section-label">Contacts &amp; Vendors</div>
+            ${contacts.map((p,i)=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;${i?'border-top:1px solid var(--bd)':''}">
+              <div><div style="font-weight:500">${esc(p.name)}</div><div style="font-size:12px;color:var(--tx3)">${esc(p.phone||'')} &middot; ${esc(p.type||'')}</div></div>
+              <span style="font-size:12px;color:${(p.days||0)>14?'var(--warn)':'var(--tx3)'}">${p.days||0}d ago</span>
+            </div>`).join('')}
+          </div></div>`;
+      } else {
+        m.innerHTML = `<div class="fi"><h1 class="page-title">People</h1>
+          <div class="pill-tabs">${['contacts','comms','observations','autonomy'].map(t2=>`<button class="pill ${t2===tab?'active':''}" onclick="window._peopleTab('${t2}')">${t2}</button>`).join('')}</div>
+          <div class="card-flat" style="text-align:center;padding:48px;color:var(--tx3)">${tab} view loading from API...</div></div>`;
+        // Try to load from appropriate API
+        let data;
+        if (tab==='comms') data = await GET('/api/people/comms?limit=20');
+        else if (tab==='observations') data = await GET('/api/people/observations');
+        else data = await GET('/api/people/autonomy-tiers');
+        // Re-render with data
+        const items = data.comms||data.observations||data.tiers||[];
+        m.querySelector('.card-flat:last-child').innerHTML = `<div class="section-label">${tab}</div>${items.map((it,i)=>`<div style="padding:10px 0;${i?'border-top:1px solid var(--bd)':''}"><div style="font-weight:500">${esc(it.person||it.action||it.name||'')}</div><div style="font-size:13px;color:var(--tx2)">${esc(it.msg||it.note||it.desc||'')}</div></div>`).join('')||'<div style="color:var(--tx3);text-align:center;padding:20px">No data</div>'}`;
+      }
+    } catch(e) { m.innerHTML = `<div class="fi"><h1 class="page-title">People</h1><div class="card-flat" style="text-align:center;padding:48px;color:var(--tx3)">Could not load people data.</div></div>`; }
+  }
+  window._peopleTab = load;
+  load(tab);
+}
+
+// ── SETTINGS ──
+async function renderSettings() {
+  const m = document.getElementById('main');
+  async function load(t) {
+    settingsTab = t||settingsTab;
+    const tabBar = `<div class="pill-tabs" style="gap:4px">${SETTINGS_TABS.map(x=>`<button class="pill ${x===settingsTab?'active':''}" style="font-size:12px;padding:7px 14px" onclick="window._settingsTab('${x}')">${SETTINGS_LABELS[x]}</button>`).join('')}</div>`;
+    m.innerHTML = `<div class="fi"><h1 class="page-title">Settings</h1>${tabBar}<div id="settings-content">${loading()}</div></div>`;
+    const sc = document.getElementById('settings-content');
+    try {
+      if (settingsTab==='health') {
+        const d = await GET('/api/health');
+        const h = d||{status:'unknown',checks:{}};
+        sc.innerHTML = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <div class="card-flat" style="grid-column:1/-1">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+              <h3 style="font-size:16px;font-weight:600;font-family:var(--head)">System Status</h3>
+              <span class="badge ${h.status==='healthy'?'badge-grn':'badge-err'}">${h.status==='healthy'?'Healthy':'Unhealthy'} &middot; ${h.uptime||0}h uptime</span>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px">
+              ${Object.entries(h.checks||{}).map(([n,c])=>`<div style="padding:14px 16px;border-radius:10px;background:var(--bg-input);border:1px solid ${c.ok?'var(--bd)':'var(--err)'}">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><div style="width:8px;height:8px;border-radius:50%;background:${c.ok?'var(--grn)':'var(--err)'}"></div><span style="font-size:13px;font-weight:600;text-transform:capitalize">${n.replace(/_/g,' ')}</span></div>
+                <div style="font-size:12px;color:var(--tx3)">${c.age!==undefined?c.age+'m ago':c.pending!==undefined?c.pending+' pending':'Connected'}</div>
+              </div>`).join('')}
+            </div>
+          </div>
+          <div class="card-flat"><h3 style="font-size:14px;font-weight:600;margin-bottom:10px">Backups</h3><div style="font-size:14px;color:var(--tx2);line-height:2">Hourly: <span style="color:var(--grn)">${h.backups?.hourly||'\u2014'}</span><br>Daily: <span style="color:var(--grn)">${h.backups?.daily||'\u2014'}</span><br>DB size: <span style="font-family:var(--mono)">${h.dbSize||'\u2014'}</span></div></div>
+          <div class="card-flat"><h3 style="font-size:14px;font-weight:600;margin-bottom:10px">Key Rotation</h3><div style="font-size:14px;color:var(--tx2);line-height:2">Anthropic: <span style="color:var(--warn)">${h.keyRotation?.anthropic||'\u2014'}</span><br>Twilio: <span style="color:var(--grn)">${h.keyRotation?.twilio||'\u2014'}</span><br><span style="font-size:12px;color:var(--tx3)">Quarterly rotation active</span></div></div>
+        </div>`;
+      } else if (settingsTab==='costs') {
+        const d = await GET('/api/costs');
+        const costs = d||{total:'\u2014',items:[]};
+        sc.innerHTML = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <div class="card-flat" style="grid-column:1/-1">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px"><h3 style="font-size:16px;font-weight:600;font-family:var(--head)">Monthly Operating Cost</h3><span style="font-size:28px;font-weight:700;color:var(--pink);font-family:var(--head)">${esc(costs.total)}</span></div>
+            ${(costs.items||[]).map((c,i)=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;${i?'border-top:1px solid var(--bd)':''}"><div><span style="font-weight:500">${esc(c.name)}</span>${c.note?`<span style="font-size:12px;color:var(--tx3);margin-left:8px">${esc(c.note)}</span>`:''}</div><span style="font-family:var(--mono);font-weight:600;font-size:14px">${esc(c.amt)}</span></div>`).join('')}
+          </div>
+          <div class="card-flat"><h3 style="font-size:14px;font-weight:600;margin-bottom:10px">API Budget</h3><div style="font-size:32px;font-weight:700;color:var(--pink);font-family:var(--head)">${esc(costs.apiSpend||'\u2014')}</div><div style="font-size:13px;color:var(--tx3);margin-bottom:12px">of ${esc(costs.apiThreshold||'$75.00')} threshold</div><div style="height:8px;background:var(--bg-input);border-radius:4px;overflow:hidden"><div style="height:100%;width:${costs.apiPct||0}%;background:linear-gradient(90deg,var(--pink),var(--lav));border-radius:4px"></div></div></div>
+          <div class="card-flat"><h3 style="font-size:14px;font-weight:600;margin-bottom:10px">Message Volume</h3><div style="font-size:32px;font-weight:700;font-family:var(--head)">${esc(costs.smsCount||'\u2014')}</div><div style="font-size:13px;color:var(--tx3);margin-bottom:8px">SMS this month</div><div style="font-size:13px;color:var(--tx2);line-height:1.8">iMessage: ${esc(costs.imessageCount||'\u2014')} (free)<br>Web chat: ${esc(costs.webChatCount||'\u2014')} sessions</div></div>
+        </div>`;
+      } else if (settingsTab==='models') {
+        const d = await GET('/api/config/models');
+        const models = d.models||[];
+        sc.innerHTML = `<div class="card-flat"><h3 style="font-size:16px;font-weight:600;font-family:var(--head);margin-bottom:16px">Active Models</h3>
+          ${models.map(ml=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:16px 0;border-top:1px solid var(--bd)">
+            <div><div style="font-size:15px;font-weight:500">${esc(ml.tier)}</div><div style="font-size:12px;color:var(--tx3)">${esc(ml.pct||'')}</div></div>
+            <div style="display:flex;align-items:center;gap:10px"><code style="font-size:12px;color:var(--pink);font-family:var(--mono);background:var(--pink-bg);padding:4px 10px;border-radius:6px">${esc(ml.val)}</code></div>
+          </div>`).join('')}</div>`;
+      } else if (settingsTab==='sources') {
+        const d = await GET('/api/sources');
+        const sources = d.sources||[];
+        sc.innerHTML = `<div class="card-flat" style="padding:0;overflow:hidden"><div style="padding:20px"><h3 style="font-size:16px;font-weight:600;font-family:var(--head)">Source Classifications</h3></div>
+          <table><thead><tr>${['Source','Type','Relevance','Privacy','Authority'].map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>
+          ${sources.map(s=>`<tr><td><div style="font-weight:500">${esc(s.name)}</div><div style="font-size:11px;color:var(--tx4);font-family:var(--mono)">${esc(s.id)}</div></td><td style="color:var(--tx2);font-size:13px">${esc(s.type)}</td><td><span class="badge badge-info">${esc(s.relevance)}</span></td><td><span class="badge ${s.privacy==='privileged'?'badge-err':'badge-grn'}">${esc(s.privacy)}</span></td><td style="color:var(--tx2);font-size:13px">${esc(s.authority)}</td></tr>`).join('')}
+          </tbody></table></div>`;
+      } else if (settingsTab==='phases') {
+        const d = await GET('/api/phases');
+        const phases = d.phases||[];
+        sc.innerHTML = `<div class="card-flat"><h3 style="font-size:16px;font-weight:600;font-family:var(--head);margin-bottom:16px">Life Phase Timeline</h3>
+          ${phases.map((p,i)=>`<div style="display:flex;align-items:flex-start;gap:16px;padding:16px;border-radius:12px;margin-bottom:8px;background:${p.status==='active'?'var(--pink-bg2)':'var(--bg-input)'};border:1px solid ${p.status==='active'?'var(--pink)':'var(--bd)'}">
+            <div style="display:flex;flex-direction:column;align-items:center;padding-top:4px"><div style="width:14px;height:14px;border-radius:50%;background:${p.status==='active'?'var(--pink)':'var(--bd)'};border:3px solid var(--bg-card)"></div>${i<phases.length-1?'<div style="width:2px;height:40px;background:var(--bd);margin-top:4px"></div>':''}</div>
+            <div style="flex:1"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><span style="font-size:15px;font-weight:600">${esc(p.name)}</span><span class="badge ${p.status==='active'?'badge-pink':'badge-lav'}">${esc(p.status)}</span></div>
+            <div style="font-size:13px;color:var(--tx2)">${esc(p.start||'')} &rarr; ${esc(p.end||'')} &middot; Cap: ${p.cap||0}/day</div><div style="font-size:13px;color:var(--tx3);margin-top:2px">${esc(p.desc||'')}</div></div>
+          </div>`).join('')}</div>`;
+      } else if (settingsTab==='config') {
+        const d = await GET('/api/config');
+        const config = d.config||[];
+        sc.innerHTML = `<div class="card-flat" style="padding:0;overflow:hidden"><div style="padding:20px"><h3 style="font-size:16px;font-weight:600;font-family:var(--head)">pib_config</h3></div>
+          <table><thead><tr>${['Key','Value','Description',''].map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>
+          ${config.map(c=>`<tr><td style="font-family:var(--mono);font-size:12px;color:var(--pink)">${esc(c.key)}</td><td style="font-family:var(--mono);font-size:12px">${esc(c.val)}</td><td style="font-size:13px;color:var(--tx2)">${esc(c.desc||'')}</td><td><button class="btn-s" style="padding:4px 10px;font-size:11px" onclick="window._configEdit('${esc(c.key)}','${esc(c.val||'')}')">Edit</button></td></tr>`).join('')}
+          </tbody></table></div>`;
+        window._configEdit = async(key,cur)=>{ const nv=prompt('Edit '+key+':',cur); if(nv!==null&&nv!==cur){ try{ await POST('/api/config/'+key,{value:nv}); load(settingsTab); }catch(e){console.error(e);}} };
+      } else if (settingsTab==='budget') {
+        const d = await GET('/api/budget');
+        const budget = d.categories||[];
+        sc.innerHTML = `<div class="card-flat"><h3 style="font-size:16px;font-weight:600;font-family:var(--head);margin-bottom:20px">Budget</h3>
+          ${budget.map(b=>{ const pct=b.target?(b.spent/b.target)*100:0; const rem=(b.target||0)-(b.spent||0); return `<div style="margin-bottom:18px">
+            <div style="display:flex;justify-content:space-between;margin-bottom:6px"><span style="font-size:14px;font-weight:500">${esc(b.icon||'')} ${esc(b.cat)}</span><span style="font-size:13px;font-family:var(--mono);color:var(--tx2)">$${b.spent} / $${b.target}</span></div>
+            <div style="height:8px;background:var(--bg-input);border-radius:4px;overflow:hidden"><div style="height:100%;border-radius:4px;width:${Math.min(pct,100)}%;background:${pct>=90?'var(--err)':pct>=75?'var(--warn)':'var(--grn)'};transition:width .5s"></div></div>
+            <div style="display:flex;justify-content:space-between;margin-top:4px;font-size:11px;color:var(--tx3)"><span>${pct.toFixed(0)}% used</span><span>$${rem} remaining</span></div>
+          </div>`; }).join('')}</div>`;
+      } else if (settingsTab==='household') {
+        const d = await GET('/api/settings/household');
+        const members = d.members||[];
+        sc.innerHTML = `<div class="card-flat"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h3 style="font-size:16px;font-weight:600;font-family:var(--head)">Household Members</h3><button class="btn-p btn-sm">+ Add Member</button></div>
+          <table><thead><tr>${['Member','Role','View Mode','Velocity Cap','Channels'].map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>
+          ${members.map(mb=>`<tr>
+            <td><div style="display:flex;align-items:center;gap:10px"><span style="font-size:20px">${esc(mb.emoji||'')}</span><div><div style="font-weight:500">${esc(mb.name)}</div><div style="font-size:11px;color:var(--tx4);font-family:var(--mono)">${esc(mb.id)}</div></div></div></td>
+            <td><span class="badge ${mb.role==='parent'?'badge-pink':'badge-lav'}">${esc(mb.role)}</span></td>
+            <td style="font-size:13px;color:var(--tx2)">${esc(mb.view_mode||'')}</td>
+            <td style="font-family:var(--mono);font-size:13px">${mb.velocity_cap??'\u2014'}</td>
+            <td style="font-size:12px;color:var(--tx2)">${(mb.channels||[]).map(ch=>`<span class="badge badge-info" style="margin:2px">${esc(ch)}</span>`).join('')||'\u2014'}</td>
+          </tr>`).join('')}</tbody></table></div>`;
+      } else if (settingsTab==='permissions') {
+        const d = await GET('/api/settings/permissions');
+        const agents = d.agents||[];
+        const layers = d.enforcement_layers||['User Consent','Privacy Fence','Governance Gates','Budget Ceiling','Undo Journal','Audit Log'];
+        sc.innerHTML = `<div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;margin-bottom:24px">
+            ${agents.map(a=>`<div class="card">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><span style="font-size:16px;font-weight:600;font-family:var(--head)">${esc(a.name)}</span><span class="badge badge-info">${esc(a.capabilities||'')}</span></div>
+              <div style="font-size:12px;color:var(--tx3);margin-bottom:8px">Allowed commands:</div>
+              <div style="display:flex;flex-wrap:wrap;gap:4px">${(a.commands||[]).map(c=>`<span class="badge badge-lav">${esc(c)}</span>`).join('')||'<span style="color:var(--tx4)">None</span>'}</div>
+              <div style="margin-top:10px;font-size:12px;color:var(--tx3)">Channels: ${(a.channels||[]).join(', ')||'all'}</div>
+            </div>`).join('')}
+          </div>
+          <div class="card-flat"><div class="section-label">6-Layer Enforcement</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">${layers.map((l,i)=>`<div style="display:flex;align-items:center;gap:8px;padding:10px 16px;border-radius:10px;background:var(--bg-input);border:1px solid var(--bd)"><div style="width:24px;height:24px;border-radius:50%;background:var(--pink);color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700">${i+1}</div><span style="font-size:13px;font-weight:500">${esc(l)}</span></div>`).join('')}</div>
+          </div></div>`;
+      } else if (settingsTab==='coaching') {
+        const d = await GET('/api/settings/coaching');
+        const protocols = d.protocols||[];
+        sc.innerHTML = `<div class="card-flat"><h3 style="font-size:16px;font-weight:600;font-family:var(--head);margin-bottom:16px">Coaching Protocols</h3>
+          ${protocols.map((p,i)=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:14px 0;${i?'border-top:1px solid var(--bd)':''}">
+            <div style="flex:1"><div style="font-size:15px;font-weight:500">${esc(p.name)}</div><div style="font-size:13px;color:var(--tx3);margin-top:2px">Trigger: ${esc(p.trigger||'')}</div></div>
+            <div onclick="window._coachToggle('${esc(p.id||p.name)}',${!p.active})" style="width:42px;height:24px;border-radius:12px;cursor:pointer;position:relative;${p.active?'background:var(--pink)':'background:var(--bd)'}"><div style="width:18px;height:18px;border-radius:50%;background:#fff;position:absolute;top:3px;left:${p.active?'21px':'3px'};transition:left .2s;box-shadow:0 1px 3px rgba(0,0,0,0.15)"></div></div>
+          </div>`).join('')}</div>`;
+        window._coachToggle = async(id,active)=>{ try{ await POST('/api/settings/coaching',{id,active}); load(settingsTab); }catch(e){console.error(e);} };
+      } else if (settingsTab==='gates') {
+        const d = await GET('/api/settings/gates');
+        const gates = d.gates||[];
+        sc.innerHTML = `<div class="card-flat" style="padding:0;overflow:hidden"><div style="padding:20px"><h3 style="font-size:16px;font-weight:600;font-family:var(--head)">Governance Gates</h3></div>
+          <table><thead><tr>${['Action','Default Gate','Agent Overrides'].map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>
+          ${gates.map(g=>`<tr>
+            <td style="font-weight:500">${esc(g.action)}</td>
+            <td><span class="badge ${g.gate==='autonomous'?'badge-grn':g.gate==='confirm'?'badge-warn':g.gate==='approve'?'badge-pink':'badge-err'}">${esc(g.gate||g.default_gate||'')}</span></td>
+            <td style="font-size:12px;color:var(--tx2)">${(g.overrides||[]).map(o=>`<span class="badge badge-lav" style="margin:2px">${esc(o.agent)}: ${esc(o.gate)}</span>`).join('')||'\u2014'}</td>
+          </tr>`).join('')}</tbody></table></div>`;
+      } else if (settingsTab==='memory') {
+        let q = '';
+        async function loadMemory(query) {
+          q = query||'';
+          const d = await GET(`/api/settings/memory?q=${encodeURIComponent(q)}&member=${currentActor}`);
+          const memories = d.memories||[];
+          document.getElementById('memory-results').innerHTML = memories.length ? memories.map(mem=>`<div class="card" style="margin-bottom:12px">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
+              <span class="badge ${mem.category==='preference'?'badge-pink':mem.category==='observation'?'badge-lav':mem.category==='fact'?'badge-info':'badge-grn'}">${esc(mem.category||'memory')}</span>
+              <span style="font-size:11px;color:var(--tx4);font-family:var(--mono)">x${mem.reinforcement_count||1}</span>
+            </div>
+            <p style="font-size:14px;color:var(--tx);line-height:1.6">${esc(mem.content)}</p>
+            <div style="font-size:11px;color:var(--tx4);margin-top:8px">${esc(mem.created_at||'')} &middot; ${esc(mem.member||currentActor)}</div>
+          </div>`).join('') : '<div style="text-align:center;padding:40px;color:var(--tx3)">No memories found.</div>';
+        }
+        sc.innerHTML = `<div>
+          <div style="display:flex;gap:8px;margin-bottom:20px"><input id="memory-search" placeholder="Search memories..." value="${esc(q)}" onkeydown="if(event.key==='Enter')window._memSearch()"><button class="btn-p" onclick="window._memSearch()">Search</button></div>
+          <div id="memory-results">${loading()}</div></div>`;
+        window._memSearch = ()=>{ const v=document.getElementById('memory-search')?.value||''; loadMemory(v); };
+        loadMemory('');
+        return; // early return since we handle our own async
+      }
+    } catch(e) {
+      sc.innerHTML = `<div class="card-flat" style="text-align:center;padding:48px;color:var(--tx3)">Could not load ${SETTINGS_LABELS[settingsTab]} data.</div>`;
+    }
+  }
+  window._settingsTab = load;
+  load(settingsTab);
+}
+
+// ── Boot ──
+renderSidebar();
+renderPage();
+// Health polling
+setInterval(async()=>{
+  try {
+    const h = await GET('/api/health');
+    const pill = document.getElementById('health-pill');
+    if(pill) { const ok=h.status==='healthy'; pill.style.background=ok?'var(--grn-bg)':'var(--err-bg)'; pill.innerHTML=`<div style="width:7px;height:7px;border-radius:50%;background:${ok?'var(--grn)':'var(--err)'};animation:pulse 2s infinite"></div><span style="font-size:12px;color:${ok?'var(--grn)':'var(--err)'};font-weight:500">${ok?'System Healthy':'System Unhealthy'}</span>`; }
+  } catch{}
+}, 300000);
+</script>
+</body>
+</html>

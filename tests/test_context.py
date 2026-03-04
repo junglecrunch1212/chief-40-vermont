@@ -195,13 +195,25 @@ class TestPrivacyFence:
 
     @pytest.mark.asyncio
     async def test_privileged_title_never_leaks(self, db_with_privileged_events):
-        """Invariant 5: privileged calendar titles must not appear in context."""
-        ctx = await build_calendar_context(
+        """Invariant 5: privileged calendar titles must not appear in context.
+
+        With member isolation, Laura-only events are invisible to James entirely.
+        Laura herself sees the redacted title.
+        """
+        # James should not see Laura-only events at all
+        ctx_james = await build_calendar_context(
             db_with_privileged_events, "2026-03-03", "2026-03-03", "m-james"
         )
-        assert PRIVACY_CANARY not in ctx
-        assert "Johnson" not in ctx
-        assert "Laura - Meeting" in ctx  # redacted title should appear
+        assert PRIVACY_CANARY not in ctx_james
+        assert "Johnson" not in ctx_james
+        assert "Laura - Meeting" not in ctx_james  # James can't see Laura-only events
+
+        # Laura sees her own event with redacted title
+        ctx_laura = await build_calendar_context(
+            db_with_privileged_events, "2026-03-03", "2026-03-03", "m-laura"
+        )
+        assert PRIVACY_CANARY not in ctx_laura  # real title never leaks
+        assert "Laura - Meeting" in ctx_laura  # redacted title appears for Laura
 
     @pytest.mark.asyncio
     async def test_full_privacy_shows_title(self, db):
@@ -223,7 +235,11 @@ class TestPrivacyFence:
 
     @pytest.mark.asyncio
     async def test_redacted_shows_unavailable(self, db):
-        """Redacted events show [unavailable]."""
+        """Redacted events show [unavailable] to the event's member.
+
+        With member isolation, Laura-only events are invisible to James.
+        Laura sees her redacted event as [unavailable].
+        """
         await db.execute(
             "INSERT INTO cal_classified_events "
             "(id, source_id, event_date, start_time, end_time, title, "
@@ -236,9 +252,16 @@ class TestPrivacyFence:
             ],
         )
         await db.commit()
-        ctx = await build_calendar_context(db, "2026-03-03", "2026-03-03", "m-james")
-        assert "Secret Thing" not in ctx
-        assert "[unavailable]" in ctx
+
+        # James can't see Laura-only events at all
+        ctx_james = await build_calendar_context(db, "2026-03-03", "2026-03-03", "m-james")
+        assert "Secret Thing" not in ctx_james
+        assert ctx_james == "No events."
+
+        # Laura sees her event as [unavailable]
+        ctx_laura = await build_calendar_context(db, "2026-03-03", "2026-03-03", "m-laura")
+        assert "Secret Thing" not in ctx_laura
+        assert "[unavailable]" in ctx_laura
 
     @pytest.mark.asyncio
     async def test_no_events(self, db):

@@ -26,6 +26,7 @@ action_gates:
   capture_create: true
   webhook_receive: true        # Inbound messages always processed
   run_proactive_checks: true   # Cron-triggered, always auto-approve
+  member_settings_set: confirm # Per-member settings require confirmation
 
 # Agent-specific overrides (merged on top of defaults above)
 agent_overrides:

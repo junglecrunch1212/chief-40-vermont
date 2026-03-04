@@ -50,6 +50,8 @@ agents:
       - "recurring-skip"        # → governance: recurring_mark_done (true)
       - "state-update"          # Record meds taken, sleep quality, energy
       - "capture"               # Quick capture to inbox
+      - "member-settings-get"   # Read per-member settings
+      - "member-settings-set"   # → governance: member_settings_set (confirm)
     blocked_cli_commands:
       - "migrate"               # Schema changes
       - "bootstrap"             # System init

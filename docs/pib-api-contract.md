@@ -436,7 +436,101 @@ All endpoints return standard error shape on failure:
 Console implements Layer 1 degradation: on API failure, shows last-known data with
 amber "⚠️ Showing cached data — connection to backend lost" banner.
 
-## Auth
+## Auth & Member Identity
 
-No auth tokens in v5 — single-household, local network. Express serves console
-and API on same port. Future: add bearer token for remote access.
+Single-household, local network. No bearer tokens in v5 — future enhancement.
+
+**Member identity**: Console sends `X-PIB-Member` header (or `?member=` query param) on every request.
+The Express server validates the member exists in `common_members` before processing.
+Write endpoints **require** this header; read endpoints accept it for scoping.
+
+---
+
+## Settings Endpoints
+
+### `GET /api/settings/permissions`
+Read-only view of agent capabilities from `config/agent_capabilities.yaml`.
+```json
+{
+  "agents": [
+    { "id": "cos", "display_name": "PIB — Chief of Staff", "capabilities": "none",
+      "channels": ["imessage", "webchat", "signal"],
+      "allowed_commands": ["what-now", "calendar-query", ...],
+      "filesystem": "read-only", "sql": "none" }
+  ],
+  "enforcement": { ... },
+  "routing": { ... }
+}
+```
+
+### `GET /api/settings/coaching`
+```json
+{
+  "protocols": [
+    { "id": "cp-001", "name": "Momentum Ride", "trigger_condition": "3+ completions in session",
+      "behavior": "Ask: want to ride it or bank it?", "active": 1 }
+  ]
+}
+```
+
+### `POST /api/settings/coaching/{id}/toggle`
+Toggle coaching protocol active/inactive.
+
+### `GET /api/settings/gates`
+Read-only view of governance gates from `config/governance.yaml`.
+```json
+{
+  "action_gates": { "task_create": true, "calendar_hold_create": "confirm", ... },
+  "agent_overrides": { "coach": { "task_create": "off" }, ... },
+  "rate_limits": { "writes_per_minute": 3 }
+}
+```
+
+### `GET /api/settings/household`
+```json
+{
+  "members": [
+    { "id": "m-james", "display_name": "James", "role": "parent", "view_mode": "carousel",
+      "velocity_cap": 15, "preferred_channel": "imessage", "active": 1 }
+  ]
+}
+```
+
+### `POST /api/settings/household/members`
+```json
+// Request
+{ "id": "m-nanny-maria", "display_name": "Maria", "role": "nanny" }
+// Response
+{ "ok": true, "id": "m-nanny-maria" }
+```
+
+### `POST /api/settings/household/members/{id}/deactivate`
+Soft-deactivate a member (never hard delete).
+
+### `GET /api/settings/memory?member=m-james&q=mortgage`
+Per-member memory browser with optional FTS5 search.
+```json
+{
+  "memories": [
+    { "id": 42, "content": "Mortgage payment is $2,847/month", "category": "facts",
+      "domain": "finance", "member_id": "m-james", "reinforcement_count": 3 }
+  ]
+}
+```
+
+### `GET /api/member-settings?member=m-james`
+```json
+{
+  "member_id": "m-james",
+  "base": { "view_mode": "carousel", "velocity_cap": 15, ... },
+  "overrides": { "theme": "dark" }
+}
+```
+
+### `POST /api/member-settings/{key}`
+```json
+// Request
+{ "value": "dark", "description": "UI theme preference" }
+// Response
+{ "member_id": "m-james", "key": "theme", "value": "dark" }
+```

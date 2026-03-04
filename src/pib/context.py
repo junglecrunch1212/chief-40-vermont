@@ -236,16 +236,16 @@ def build_conversation_history(messages: list[dict], channel: str) -> list[dict]
 
 CROSS_DOMAIN_SUMMARY_SQL = """
 SELECT
-    (SELECT COUNT(*) FROM ops_tasks WHERE status NOT IN ('done','dismissed')) AS active_tasks,
-    (SELECT COUNT(*) FROM ops_tasks WHERE due_date < date('now') AND status NOT IN ('done','dismissed','deferred')) AS overdue_tasks,
-    (SELECT COUNT(*) FROM ops_tasks WHERE due_date = date('now') AND status NOT IN ('done','dismissed')) AS due_today,
+    (SELECT COUNT(*) FROM ops_tasks WHERE assignee = ? AND status NOT IN ('done','dismissed')) AS active_tasks,
+    (SELECT COUNT(*) FROM ops_tasks WHERE assignee = ? AND due_date < date('now') AND status NOT IN ('done','dismissed','deferred')) AS overdue_tasks,
+    (SELECT COUNT(*) FROM ops_tasks WHERE assignee = ? AND due_date = date('now') AND status NOT IN ('done','dismissed')) AS due_today,
     (SELECT COUNT(*) FROM cal_conflicts WHERE status = 'unresolved') AS open_conflicts,
     (SELECT SUM(CASE WHEN over_threshold = 1 THEN 1 ELSE 0 END) FROM fin_budget_snapshot) AS budget_alerts,
     (SELECT name FROM common_life_phases WHERE status = 'active' LIMIT 1) AS active_phase
 """
 
 
-async def build_cross_domain_summary(db) -> str:
+async def build_cross_domain_summary(db, member_id: str = "m-james") -> str:
     """Build the always-on ~500-token cross-domain summary.
 
     Enriched with sensor data when available:
@@ -256,7 +256,7 @@ async def build_cross_domain_summary(db) -> str:
     - Deliveries
     - Active sensor alerts
     """
-    row = await db.execute_fetchone(CROSS_DOMAIN_SUMMARY_SQL)
+    row = await db.execute_fetchone(CROSS_DOMAIN_SUMMARY_SQL, [member_id, member_id, member_id])
     if not row:
         return "No data available."
 
@@ -461,10 +461,17 @@ async def _build_sensor_summary_lines(db) -> list[str]:
 # ─── Privacy-Filtered Calendar Context ───
 
 async def build_calendar_context(db, start_date: str, end_date: str, member_id: str) -> str:
-    """Calendar context with privacy filtering at the read layer."""
+    """Calendar context with privacy + member filtering at the read layer.
+
+    Only returns events that are household-wide (for_member_ids = '[]') or
+    that include the requesting member in their for_member_ids JSON array.
+    """
     events = await db.execute_fetchall(
-        "SELECT * FROM cal_classified_events WHERE event_date BETWEEN ? AND ? ORDER BY start_time",
-        [start_date, end_date],
+        "SELECT * FROM cal_classified_events "
+        "WHERE event_date BETWEEN ? AND ? "
+        "AND (for_member_ids = '[]' OR for_member_ids LIKE '%' || ? || '%') "
+        "ORDER BY start_time",
+        [start_date, end_date, member_id],
     )
 
     lines = []
@@ -485,8 +492,8 @@ async def assemble_context(db, member_id: str, message: str) -> str:
     """Assemble the full context block for the LLM: summary + calendar + memory + whatNow."""
     parts = []
 
-    # Cross-domain summary (always included)
-    summary = await build_cross_domain_summary(db)
+    # Cross-domain summary (always included, scoped to member)
+    summary = await build_cross_domain_summary(db, member_id=member_id)
     parts.append(f"DASHBOARD: {summary}")
 
     # Relevance-driven assembly
@@ -522,11 +529,11 @@ async def assemble_context(db, member_id: str, message: str) -> str:
             member = await db.execute_fetchone("SELECT display_name FROM common_members WHERE id = ?", [parent])
             parts.append(f"CUSTODY TODAY: {member['display_name'] if member else parent}")
 
-    # Memory injection
+    # Memory injection (scoped to requesting member)
     from pib.memory import search_memory
     search_terms = " ".join(w for w in message.split() if len(w) > 3)[:50]
     if search_terms:
-        memories = await search_memory(db, search_terms, limit=5)
+        memories = await search_memory(db, search_terms, limit=5, member_id=member_id)
         if memories:
             mem_lines = [f"  - {m['content']}" for m in memories]
             parts.append(f"RELEVANT MEMORIES:\n" + "\n".join(mem_lines))

@@ -49,11 +49,13 @@ WRITE_COMMANDS = {
     "recurring-done", "recurring-skip",
     "state-update", "capture",
     "run-proactive-checks", "webhook-receive",
+    "member-settings-set",
 }
 ADMIN_COMMANDS = {"bootstrap", "backup", "migrate"}
 READ_COMMANDS = {
     "what-now", "calendar-query", "custody", "budget", "search",
     "morning-digest", "health", "streak", "upcoming", "scoreboard-data",
+    "member-settings-get",
 }
 
 # Map CLI commands to governance action_gates keys
@@ -71,6 +73,7 @@ COMMAND_TO_GATE = {
     "capture": "capture_create",
     "webhook-receive": "webhook_receive",
     "run-proactive-checks": "run_proactive_checks",
+    "member-settings-set": "member_settings_set",
 }
 
 ALL_COMMANDS = READ_COMMANDS | WRITE_COMMANDS | ADMIN_COMMANDS
@@ -359,15 +362,16 @@ async def cmd_budget(db, args: dict, agent_id: str) -> dict:
 
 
 async def cmd_search(db, args: dict, agent_id: str) -> dict:
-    """FTS5 memory search."""
+    """FTS5 memory search, scoped to requesting member."""
     from pib.memory import search_memory
 
     query = args.get("query", "")
     limit = args.get("limit", 10)
+    member_id = args.get("member_id")
     if not query:
         return {"error": "query is required", "results": []}
 
-    results = await search_memory(db, query, limit=limit)
+    results = await search_memory(db, query, limit=limit, member_id=member_id)
     return {"query": query, "results": results, "count": len(results)}
 
 
@@ -818,6 +822,72 @@ async def cmd_migrate(db, args: dict, agent_id: str) -> dict:
     return {"status": "ok", "message": "Migrations applied"}
 
 
+async def cmd_member_settings_get(db, args: dict, agent_id: str) -> dict:
+    """Get all settings for a member (common_members columns + pib_member_settings overrides)."""
+    member_id = args.get("member_id", "m-james")
+
+    member = await db.execute_fetchone(
+        "SELECT * FROM common_members WHERE id = ?", [member_id]
+    )
+    if not member:
+        return {"error": f"Member {member_id} not found"}
+
+    # Base settings from common_members columns
+    base = {
+        "view_mode": member["view_mode"],
+        "digest_mode": member["digest_mode"],
+        "velocity_cap": member["velocity_cap"],
+        "preferred_channel": member["preferred_channel"],
+        "energy_markers": member["energy_markers"],
+        "medication_config": member["medication_config"],
+    }
+
+    # Override with pib_member_settings
+    overrides_rows = await db.execute_fetchall(
+        "SELECT key, value, description FROM pib_member_settings WHERE member_id = ?",
+        [member_id],
+    )
+    overrides = {r["key"]: r["value"] for r in overrides_rows} if overrides_rows else {}
+
+    return {"member_id": member_id, "base": base, "overrides": overrides}
+
+
+async def cmd_member_settings_set(db, args: dict, agent_id: str) -> dict:
+    """Upsert a per-member setting in pib_member_settings."""
+    from pib.db import audit_log
+
+    member_id = args.get("member_id", "m-james")
+    key = args.get("key")
+    value = args.get("value")
+    description = args.get("description")
+
+    if not key or value is None:
+        return {"error": "key and value are required"}
+
+    member = await db.execute_fetchone(
+        "SELECT id FROM common_members WHERE id = ?", [member_id]
+    )
+    if not member:
+        return {"error": f"Member {member_id} not found"}
+
+    await db.execute(
+        "INSERT INTO pib_member_settings (member_id, key, value, description, updated_by) "
+        "VALUES (?, ?, ?, ?, ?) "
+        "ON CONFLICT(member_id, key) DO UPDATE SET "
+        "value = excluded.value, description = excluded.description, "
+        "updated_by = excluded.updated_by, "
+        "updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')",
+        [member_id, key, str(value), description, agent_id],
+    )
+    await audit_log(
+        db, "pib_member_settings", "UPSERT", f"{member_id}:{key}",
+        actor=agent_id, new_values=json.dumps({"key": key, "value": value}),
+        source="cli",
+    )
+    await db.commit()
+    return {"member_id": member_id, "key": key, "value": value}
+
+
 # ═══════════════════════════════════════════════════════════
 # COMMAND REGISTRY
 # ═══════════════════════════════════════════════════════════
@@ -850,6 +920,8 @@ COMMAND_REGISTRY: dict[str, tuple[Any, str]] = {
     "backup":               (cmd_backup,                "admin"),
     "webhook-receive":      (cmd_webhook_receive,       "write"),
     "migrate":              (cmd_migrate,               "admin"),
+    "member-settings-get":  (cmd_member_settings_get,   "read"),
+    "member-settings-set":  (cmd_member_settings_set,   "write"),
 }
 
 

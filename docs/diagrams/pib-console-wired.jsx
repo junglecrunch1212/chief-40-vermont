@@ -1398,6 +1398,261 @@ function PeoplePage() {
 }
 
 // ─── SETTINGS PAGE — WIRED ───
+// ─── SETTINGS SUB-TABS ───
+
+function SettingsHouseholdTab() {
+  const { data } = useAPI("/api/settings/household");
+  const members = data?.members ?? [];
+  const [showAdd, setShowAdd] = useState(false);
+
+  return (
+    <div className="card-flat" style={{ padding: 0, overflow: "hidden" }}>
+      <div style={{ padding: 20, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <h3 style={{ fontSize: 16, fontWeight: 600, fontFamily: "var(--head)" }}>Family Members</h3>
+        <button className="btn-s" onClick={() => setShowAdd(!showAdd)}>+ Add Member</button>
+      </div>
+      {showAdd && (
+        <div style={{ padding: "0 20px 16px", display: "flex", gap: 8 }}>
+          <input id="add-id" placeholder="ID (m-name)" style={{ flex: 1, padding: 8, borderRadius: 8, border: "1px solid var(--bd)" }} />
+          <input id="add-name" placeholder="Display name" style={{ flex: 1, padding: 8, borderRadius: 8, border: "1px solid var(--bd)" }} />
+          <select id="add-role" style={{ padding: 8, borderRadius: 8, border: "1px solid var(--bd)" }}>
+            <option value="parent">Parent</option><option value="child">Child</option>
+            <option value="nanny">Nanny</option><option value="babysitter">Babysitter</option>
+            <option value="grandparent">Grandparent</option><option value="other">Other</option>
+          </select>
+          <button className="btn-s" onClick={async () => {
+            await api.post("/api/settings/household/members", {
+              id: document.getElementById("add-id").value,
+              display_name: document.getElementById("add-name").value,
+              role: document.getElementById("add-role").value,
+            });
+            setShowAdd(false);
+          }}>Save</button>
+        </div>
+      )}
+      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <thead>
+          <tr style={{ borderBottom: "2px solid var(--bd)", background: "var(--bg-input)" }}>
+            {["Member", "Role", "View Mode", "Vel. Cap", "Channel", "Status"].map(h => (
+              <th key={h} style={{ textAlign: "left", padding: "10px 14px", fontSize: 11, fontWeight: 600, color: "var(--tx3)", textTransform: "uppercase" }}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {members.map(m => (
+            <tr key={m.id} style={{ borderBottom: "1px solid var(--bd)", opacity: m.active ? 1 : 0.5 }}>
+              <td style={{ padding: "12px 14px" }}>
+                <div style={{ fontWeight: 500 }}>{m.display_name}</div>
+                <div style={{ fontSize: 11, color: "var(--tx4)", fontFamily: "var(--mono)" }}>{m.id}</div>
+              </td>
+              <td style={{ padding: "12px 14px" }}><span className="badge badge-lav">{m.role}</span></td>
+              <td style={{ padding: "12px 14px", fontSize: 13, color: "var(--tx2)" }}>{m.view_mode || "standard"}</td>
+              <td style={{ padding: "12px 14px", fontFamily: "var(--mono)", fontSize: 13 }}>{m.velocity_cap || 20}</td>
+              <td style={{ padding: "12px 14px", fontSize: 13, color: "var(--tx2)" }}>{m.preferred_channel || "—"}</td>
+              <td style={{ padding: "12px 14px" }}>
+                <span className={`badge ${m.active ? "badge-grn" : "badge-err"}`}>{m.active ? "Active" : "Inactive"}</span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function SettingsPermissionsTab() {
+  const { data } = useAPI("/api/settings/permissions");
+  const agents = data?.agents ?? [];
+  const enforcement = data?.enforcement ?? {};
+
+  return (
+    <div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 24 }}>
+        {agents.map(a => (
+          <div key={a.id} className="card-flat" style={{ padding: 20 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <h4 style={{ fontSize: 15, fontWeight: 600 }}>{a.display_name}</h4>
+              <span className={`badge ${a.capabilities === "full" ? "badge-err" : a.capabilities === "none" ? "badge-grn" : "badge-lav"}`}>
+                {a.capabilities}
+              </span>
+            </div>
+            <div style={{ fontSize: 12, color: "var(--tx3)", marginBottom: 8 }}>
+              Channels: {(a.channels || []).join(", ")} | Model: {a.model || "none"}
+            </div>
+            <div style={{ fontSize: 12, color: "var(--tx3)", marginBottom: 4 }}>
+              FS: {a.filesystem} | SQL: {a.sql}
+            </div>
+            <div style={{ fontSize: 12, marginTop: 8 }}>
+              <strong>Allowed:</strong> {Array.isArray(a.allowed_commands) ? a.allowed_commands.join(", ") : a.allowed_commands}
+            </div>
+            {a.restrictions?.length > 0 && (
+              <div style={{ fontSize: 11, color: "var(--err)", marginTop: 6 }}>
+                {a.restrictions.map((r, i) => <div key={i}>⚠ {r}</div>)}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      <div className="card-flat" style={{ padding: 20 }}>
+        <h3 style={{ fontSize: 16, fontWeight: 600, fontFamily: "var(--head)", marginBottom: 16 }}>6-Layer Enforcement Model</h3>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
+          {Object.entries(enforcement).map(([key, layer]) => (
+            <div key={key} style={{ padding: 14, borderRadius: 10, background: "var(--bg-input)", border: "1px solid var(--bd)" }}>
+              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>{key.replace(/_/g, " ")}</div>
+              <div style={{ fontSize: 12, color: "var(--tx3)" }}>{layer.description}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SettingsCoachingTab() {
+  const { data, refetch } = useAPI("/api/settings/coaching");
+  const protocols = data?.protocols ?? [];
+
+  const handleToggle = async (id) => {
+    await api.post(`/api/settings/coaching/${id}/toggle`);
+    refetch();
+  };
+
+  return (
+    <div className="card-flat" style={{ padding: 0, overflow: "hidden" }}>
+      <div style={{ padding: 20 }}>
+        <h3 style={{ fontSize: 16, fontWeight: 600, fontFamily: "var(--head)" }}>Coaching Protocols</h3>
+      </div>
+      {protocols.length === 0 ? (
+        <div style={{ padding: "20px", textAlign: "center", color: "var(--tx3)" }}>No coaching protocols configured yet.</div>
+      ) : (
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr style={{ borderBottom: "2px solid var(--bd)", background: "var(--bg-input)" }}>
+              {["Protocol", "Trigger", "Behavior", "Active"].map(h => (
+                <th key={h} style={{ textAlign: "left", padding: "10px 14px", fontSize: 11, fontWeight: 600, color: "var(--tx3)", textTransform: "uppercase" }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {protocols.map(p => (
+              <tr key={p.id} style={{ borderBottom: "1px solid var(--bd)" }}>
+                <td style={{ padding: "12px 14px", fontWeight: 500 }}>{p.name}</td>
+                <td style={{ padding: "12px 14px", fontSize: 13, color: "var(--tx2)" }}>{p.trigger_condition}</td>
+                <td style={{ padding: "12px 14px", fontSize: 13, color: "var(--tx2)" }}>{p.behavior}</td>
+                <td style={{ padding: "12px 14px" }}>
+                  <button className={`badge ${p.active ? "badge-grn" : "badge-err"}`} onClick={() => handleToggle(p.id)} style={{ cursor: "pointer", border: "none" }}>
+                    {p.active ? "Active" : "Inactive"}
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+function SettingsGatesTab() {
+  const { data } = useAPI("/api/settings/gates");
+  const gates = data?.action_gates ?? {};
+  const overrides = data?.agent_overrides ?? {};
+  const rateLimits = data?.rate_limits ?? {};
+  const agentIds = Object.keys(overrides);
+
+  return (
+    <div>
+      <div className="card-flat" style={{ padding: 0, overflow: "hidden", marginBottom: 16 }}>
+        <div style={{ padding: 20 }}>
+          <h3 style={{ fontSize: 16, fontWeight: 600, fontFamily: "var(--head)" }}>Governance Gates</h3>
+          <div style={{ fontSize: 13, color: "var(--tx3)", marginTop: 4 }}>Read-only view of config/governance.yaml. Edit via dev agent in OpenClaw.</div>
+        </div>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr style={{ borderBottom: "2px solid var(--bd)", background: "var(--bg-input)" }}>
+              <th style={{ textAlign: "left", padding: "10px 14px", fontSize: 11, fontWeight: 600, color: "var(--tx3)", textTransform: "uppercase" }}>Action</th>
+              <th style={{ textAlign: "left", padding: "10px 14px", fontSize: 11, fontWeight: 600, color: "var(--tx3)", textTransform: "uppercase" }}>Default</th>
+              {agentIds.map(a => (
+                <th key={a} style={{ textAlign: "left", padding: "10px 14px", fontSize: 11, fontWeight: 600, color: "var(--tx3)", textTransform: "uppercase" }}>{a}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {Object.entries(gates).map(([action, gate]) => (
+              <tr key={action} style={{ borderBottom: "1px solid var(--bd)" }}>
+                <td style={{ padding: "10px 14px", fontFamily: "var(--mono)", fontSize: 12 }}>{action}</td>
+                <td style={{ padding: "10px 14px" }}>
+                  <span className={`badge ${gate === true || gate === "true" ? "badge-grn" : gate === "confirm" ? "badge-warn" : "badge-err"}`}>
+                    {String(gate)}
+                  </span>
+                </td>
+                {agentIds.map(a => {
+                  const ov = overrides[a]?.[action];
+                  return (
+                    <td key={a} style={{ padding: "10px 14px" }}>
+                      {ov !== undefined ? (
+                        <span className={`badge ${ov === "off" || ov === false ? "badge-err" : ov === "confirm" ? "badge-warn" : "badge-grn"}`}>
+                          {String(ov)}
+                        </span>
+                      ) : <span style={{ color: "var(--tx4)", fontSize: 12 }}>—</span>}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="card-flat" style={{ padding: 20 }}>
+        <h4 style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>Rate Limits</h4>
+        <div style={{ fontSize: 14, color: "var(--tx2)" }}>
+          Writes per minute: <strong>{rateLimits.writes_per_minute || 3}</strong> | Alert threshold: <strong>{rateLimits.alert_threshold || 3}</strong>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SettingsMemoryTab() {
+  const [query, setQuery] = useState("");
+  const { data, refetch } = useAPI(`/api/settings/memory${query ? `?q=${encodeURIComponent(query)}` : ""}`, [query]);
+  const memories = data?.memories ?? data?.results ?? [];
+
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+        <input
+          value={query} onChange={e => setQuery(e.target.value)}
+          placeholder="Search memories..."
+          style={{ flex: 1, padding: "10px 14px", borderRadius: 10, border: "1px solid var(--bd)", fontSize: 14 }}
+        />
+      </div>
+      <div className="card-flat" style={{ padding: 0, overflow: "hidden" }}>
+        {memories.length === 0 ? (
+          <div style={{ padding: 32, textAlign: "center", color: "var(--tx3)" }}>
+            {query ? "No memories found." : "Loading memories..."}
+          </div>
+        ) : memories.map(m => (
+          <div key={m.id} style={{ padding: "14px 20px", borderBottom: "1px solid var(--bd)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 14 }}>{m.content}</div>
+                <div style={{ fontSize: 11, color: "var(--tx4)", marginTop: 4 }}>
+                  {m.category} · {m.domain || "general"} · reinforced {m.reinforcement_count || 1}x
+                  {m.is_permanent ? " · permanent" : ""}
+                </div>
+              </div>
+              <span className={`badge ${m.source === "user_stated" ? "badge-grn" : "badge-lav"}`} style={{ fontSize: 10, whiteSpace: "nowrap" }}>
+                {m.source || "unknown"}
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function SettingsPage() {
   const [tab, setTab] = useState("health");
   const tabs = ["health", "costs", "models", "sources", "phases", "config", "budget", "household", "permissions", "coaching", "gates", "memory"];
@@ -1643,15 +1898,11 @@ function SettingsPage() {
         </div>
       )}
 
-      {/* Fallback for unbuilt tabs */}
-      {["household", "permissions", "coaching", "gates", "memory"].includes(tab) && (
-        <div className="card-flat" style={{ textAlign: "center", padding: 48 }}>
-          <div style={{ fontSize: 32, marginBottom: 12 }}>🚧</div>
-          <div style={{ fontSize: 16, fontWeight: 600, fontFamily: "var(--head)", marginBottom: 8 }}>{tl[tab]}</div>
-          <div style={{ fontSize: 14, color: "var(--tx3)" }}>Configuration panel — Edit → Preview → Confirm workflow</div>
-          <div style={{ fontSize: 13, color: "var(--tx4)", marginTop: 8 }}>Maps to real config files. Coming in Sprint 7.</div>
-        </div>
-      )}
+      {tab === "household" && <SettingsHouseholdTab />}
+      {tab === "permissions" && <SettingsPermissionsTab />}
+      {tab === "coaching" && <SettingsCoachingTab />}
+      {tab === "gates" && <SettingsGatesTab />}
+      {tab === "memory" && <SettingsMemoryTab />}
     </div>
   );
 }

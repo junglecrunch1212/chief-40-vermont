@@ -13,7 +13,7 @@
 ```
                         ┌─────────────────────────┐
                         │    CoS Mac Mini (Hub)    │
-                        │   $COS_HOST :3141        │
+                        │   $COS_HOST :3333        │
                         │                         │
                         │  ┌───────────────────┐  │
                         │  │ OpenClaw / PIB v5  │  │
@@ -23,7 +23,7 @@
                         │  └───────────────────┘  │
                         └────────┬───────┬────────┘
                                  │       │
-                    LAN :3141    │       │   LAN :3141
+                    LAN :3333    │       │   LAN :3333
                    ┌─────────────┘       └─────────────┐
                    ▼                                     ▼
         ┌─────────────────────┐             ┌─────────────────────┐
@@ -66,8 +66,8 @@
 
 | Endpoint | URL |
 |----------|-----|
-| Sensor ingest | `http://$COS_HOST:3141/api/sensors/ingest` |
-| Task capture | `http://$COS_HOST:3141/api/capture/task` |
+| Sensor ingest | `http://$COS_HOST:3333/api/sensors/ingest` |
+| Task capture | `http://$COS_HOST:3333/api/capture/task` |
 
 > **`$COS_HOST`** = the CoS Mac Mini's address, e.g. `pib-mini.local` or `192.168.1.100`. Set this once in each Mini's environment.
 
@@ -154,7 +154,7 @@ BlueBubbles bridges iMessage to webhooks. James's instance uses **James's Apple 
 2. In **Settings → Connection**:
    - Server URL: use the local address (e.g., `http://james-mini.local:1234`)
 3. In **Settings → Webhooks**, add a new webhook:
-   - **URL:** `http://$COS_HOST:3141/api/webhooks/bluebubbles/james`
+   - **URL:** `http://$COS_HOST:3333/api/webhooks/bluebubbles/james`
    - **Events:** Select all message events (new message, updated message, typing indicator)
 4. In **Settings → General**:
    - Enable "Start on Login"
@@ -275,7 +275,7 @@ Create a Shortcut automation for each HomeKit device state change. Example for f
 1. **Shortcuts → Automation → +**
 2. **"When Front Door Lock locks/unlocks"**
 3. Add action: **Get Contents of URL**
-   - URL: `http://$COS_HOST:3141/api/sensors/ingest`
+   - URL: `http://$COS_HOST:3333/api/sensors/ingest`
    - Method: POST
    - Headers: `Content-Type: application/json`
    - Body (JSON):
@@ -332,7 +332,7 @@ Same as Section 2.2.
 Same as Section 2.3, but:
 
 - Sign in with **Laura's Apple ID** in Messages
-- Webhook URL: `http://$COS_HOST:3141/api/webhooks/bluebubbles/laura`
+- Webhook URL: `http://$COS_HOST:3333/api/webhooks/bluebubbles/laura`
 
 ### 3.4 Apple Shortcuts Automations
 
@@ -382,7 +382,7 @@ The CoS will also enforce this server-side regardless of what the client sends, 
 All sensor data is POSTed to:
 
 ```
-POST http://$COS_HOST:3141/api/sensors/ingest
+POST http://$COS_HOST:3333/api/sensors/ingest
 Content-Type: application/json
 ```
 
@@ -605,7 +605,7 @@ State values vary by type:
 Actionable captures (e.g., "Hey Siri, tell Poopsy buy milk") go to:
 
 ```
-POST http://$COS_HOST:3141/api/capture/task
+POST http://$COS_HOST:3333/api/capture/task
 Content-Type: application/json
 ```
 
@@ -694,7 +694,7 @@ The CoS will:
    ```
 
 6. **Get Contents of URL**
-   - URL: `http://pib-mini.local:3141/api/sensors/ingest`
+   - URL: `http://pib-mini.local:3333/api/sensors/ingest`
    - Method: **POST**
    - Headers: `Content-Type` → `application/json`
    - Request Body: **JSON** → the dictionary from step 5
@@ -753,7 +753,7 @@ End If
    ```
 
 3. **Get Contents of URL**
-   - URL: `http://pib-mini.local:3141/api/sensors/ingest`
+   - URL: `http://pib-mini.local:3333/api/sensors/ingest`
    - Method: **POST**
    - Headers: `Content-Type` → `application/json`
    - Request Body: **JSON** → the dictionary
@@ -813,7 +813,7 @@ End If
    ```
 
 3. **Get Contents of URL**
-   - URL: `http://pib-mini.local:3141/api/capture/task`
+   - URL: `http://pib-mini.local:3333/api/capture/task`
    - Method: **POST**
    - Headers: `Content-Type` → `application/json`
    - Request Body: **JSON** → the dictionary
@@ -872,7 +872,7 @@ QUEUE_DIR="$HOME/Library/Mobile Documents/iCloud~is~workflow~my~workflows/Docume
 COS_HOST="${COS_HOST:-pib-mini.local}"
 
 # Check if CoS is reachable
-if ! curl -sf "http://${COS_HOST}:3141/health" > /dev/null 2>&1; then
+if ! curl -sf "http://${COS_HOST}:3333/health" > /dev/null 2>&1; then
     exit 0  # CoS down, try later
 fi
 
@@ -884,7 +884,7 @@ for f in "$QUEUE_DIR"/*.json; do
     if curl -sf -X POST \
         -H "Content-Type: application/json" \
         -d "$payload" \
-        "http://${COS_HOST}:3141${endpoint}"; then
+        "http://${COS_HOST}:3333${endpoint}"; then
         rm "$f"
         echo "Flushed: $(basename "$f")"
     fi
@@ -1059,7 +1059,7 @@ Internet ──── Router/Firewall ──── LAN
                     ┌───────────────┼───────────────┐
                     │               │               │
                CoS Mini       James Mini       Laura Mini
-             :3141 (API)    :1234 (BB)       :1234 (BB)
+             :3333 (API)    :1234 (BB)       :1234 (BB)
                             :8581 (HB UI)
                             :51826 (HAP)
                             :51829 (Fwd)
@@ -1240,7 +1240,7 @@ ssh james@james-mini.local 'sudo shutdown -r now'
 | Is iMessage signed in? | Open Messages app, check Settings → iMessage |
 | Full Disk Access revoked? | System Settings → Privacy & Security → Full Disk Access → ensure BB checked |
 | macOS update changed permissions? | Re-grant Full Disk Access and Accessibility |
-| Webhook URL wrong? | Open BB → Settings → Webhooks → verify URL matches `http://$COS_HOST:3141/api/webhooks/bluebubbles/[member]` |
+| Webhook URL wrong? | Open BB → Settings → Webhooks → verify URL matches `http://$COS_HOST:3333/api/webhooks/bluebubbles/[member]` |
 
 **Nuclear option:**
 ```bash
@@ -1260,7 +1260,7 @@ open -a BlueBubbles
 | Is the automation enabled? | Shortcuts → Automations → verify toggle is ON |
 | "Ask Before Running" enabled? | Must be OFF for background automations. Edit automation → disable "Ask Before Running" |
 | Did macOS update reset automations? | Re-check all automations after any macOS update |
-| Network issue? | `curl -sf http://$COS_HOST:3141/health` from the Mini |
+| Network issue? | `curl -sf http://$COS_HOST:3333/health` from the Mini |
 | Check queue folder | `ls ~/Library/Mobile\ Documents/iCloud~is~workflow~my~workflows/Documents/PIB_Queue/` |
 | Shortcut permissions revoked? | Run the shortcut manually — macOS will re-prompt for permissions |
 
@@ -1315,7 +1315,7 @@ ping -c 3 $COS_HOST
 nc -zv $COS_HOST 3141
 
 # Health endpoint
-curl -v http://$COS_HOST:3141/health
+curl -v http://$COS_HOST:3333/health
 
 # DNS resolution
 dscacheutil -q host -a name pib-mini.local
@@ -1377,7 +1377,7 @@ Run through this after setting up each Mini:
 
 - [ ] Hostname set correctly (`hostname` returns expected name)
 - [ ] `$COS_HOST` resolves (`ping $COS_HOST`)
-- [ ] CoS API reachable (`curl http://$COS_HOST:3141/health`)
+- [ ] CoS API reachable (`curl http://$COS_HOST:3333/health`)
 - [ ] BlueBubbles running and webhook configured
 - [ ] Send a test iMessage → verify it appears in CoS logs
 - [ ] Run each Shortcut manually → verify data arrives at CoS

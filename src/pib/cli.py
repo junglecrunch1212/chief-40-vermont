@@ -48,7 +48,7 @@ WRITE_COMMANDS = {
     "hold-create", "hold-confirm", "hold-reject",
     "recurring-done", "recurring-skip",
     "state-update", "capture",
-    "run-proactive-checks", "webhook-receive",
+    "run-proactive-checks", "webhook-receive", "sensor-ingest",
     "member-settings-set",
     # Channel commands (writes)
     "channel-enable", "channel-disable", "channel-step-done",
@@ -60,7 +60,7 @@ ADMIN_COMMANDS = {"bootstrap", "backup", "migrate"}
 READ_COMMANDS = {
     "what-now", "calendar-query", "custody", "budget", "search",
     "morning-digest", "health", "streak", "upcoming", "scoreboard-data",
-    "member-settings-get",
+    "member-settings-get", "bootstrap-verify",
     # Channel commands (reads)
     "channel-list", "channel-status", "channel-onboarding", "channel-test",
     "channel-send-enum", "channel-member-list",
@@ -780,18 +780,33 @@ async def cmd_backup(db, args: dict, agent_id: str) -> dict:
 async def cmd_webhook_receive(db, args: dict, agent_id: str) -> dict:
     """Receive and process a BlueBubbles webhook payload.
 
-    Validates API key from BLUEBUBBLES_SECRET env var.
-    Parses payload, resolves member, writes to DB or processes via ingest.
+    Per-bridge credential isolation: validates API key from BLUEBUBBLES_{BRIDGE_ID}_SECRET.
+    Forces member_id from bridge_id (james→m-james, laura→m-laura) regardless of payload.
     """
     from pib.ingest import IngestEvent, ingest, make_idempotency_key, resolve_member
 
-    # Validate API key
-    expected_secret = os.environ.get("BLUEBUBBLES_SECRET", "")
+    # Per-bridge credential validation
+    bridge_id = args.get("bridge_id", "").lower()
     provided_secret = args.get("api_key", "")
-    if not expected_secret:
-        return {"error": "BLUEBUBBLES_SECRET not configured"}
-    if provided_secret != expected_secret:
-        return {"error": "Invalid API key", "status": "unauthorized"}
+
+    # Map bridge_id to member_id and environment variable
+    bridge_member_map = {"james": "m-james", "laura": "m-laura"}
+    if bridge_id not in bridge_member_map:
+        # Fallback to legacy single secret for backwards compat
+        expected_secret = os.environ.get("BLUEBUBBLES_SECRET", "")
+        if not expected_secret:
+            return {"error": "BLUEBUBBLES_SECRET not configured and no valid bridge_id"}
+        if provided_secret != expected_secret:
+            return {"error": "Invalid API key", "status": "unauthorized"}
+        forced_member_id = None
+    else:
+        env_key = f"BLUEBUBBLES_{bridge_id.upper()}_SECRET"
+        expected_secret = os.environ.get(env_key, "")
+        if not expected_secret:
+            return {"error": f"{env_key} not configured"}
+        if provided_secret != expected_secret:
+            return {"error": f"Invalid API key for bridge {bridge_id}", "status": "unauthorized"}
+        forced_member_id = bridge_member_map[bridge_id]
 
     payload = args.get("payload", {})
     if not payload:
@@ -816,8 +831,17 @@ async def cmd_webhook_receive(db, args: dict, agent_id: str) -> dict:
         reply_address=sender_address,
     )
 
-    # Resolve member
-    event.member_id = await resolve_member(db, event)
+    # Member resolution: forced from bridge_id takes precedence
+    if forced_member_id:
+        resolved_member_id = await resolve_member(db, event)
+        if resolved_member_id and resolved_member_id != forced_member_id:
+            log.warning(
+                f"Bridge {bridge_id} member mismatch: payload resolved to {resolved_member_id}, "
+                f"forcing to {forced_member_id}"
+            )
+        event.member_id = forced_member_id
+    else:
+        event.member_id = await resolve_member(db, event)
 
     # Process through ingest pipeline
     actions = await ingest(event, db)
@@ -826,6 +850,7 @@ async def cmd_webhook_receive(db, args: dict, agent_id: str) -> dict:
         "status": "processed",
         "message_guid": message_guid,
         "member_id": event.member_id,
+        "bridge_id": bridge_id or None,
         "actions": actions,
     }
 
@@ -905,6 +930,271 @@ async def cmd_member_settings_set(db, args: dict, agent_id: str) -> dict:
     return {"member_id": member_id, "key": key, "value": value}
 
 
+async def cmd_bootstrap_verify(db, args: dict, agent_id: str) -> dict:
+    """Comprehensive standalone verification that the brain works end-to-end without bridges.
+
+    Runs multiple checks:
+    - evaluate_readiness(db)
+    - what_now for m-james and m-laura
+    - Task create/verify/cleanup
+    - Custody logic
+    - Governance gate (coach can't create tasks)
+    - Calendar context for both members
+    - Voice profiles for both members
+    - Memory isolation test
+    - Optional bridge connectivity check
+
+    Returns structured JSON report with pass/fail per check, overall PASS/FAIL.
+    """
+    import subprocess
+
+    from pib.readiness import evaluate_readiness
+    from pib.custody import who_has_child
+    from pib.context import build_calendar_context
+    from pib.memory import save_memory_deduped, search_memory
+    from pib.voice import get_profiles
+
+    checks: dict[str, dict] = {}
+    today = date.today()
+
+    # 1. Readiness check
+    try:
+        readiness = await evaluate_readiness(db)
+        checks["readiness"] = {
+            "pass": readiness.get("ready", False),
+            "detail": readiness,
+        }
+    except Exception as e:
+        checks["readiness"] = {"pass": False, "detail": str(e)}
+
+    # 2. what-now for m-james
+    try:
+        result = await cmd_what_now(db, {"member_id": "m-james"}, agent_id)
+        checks["what_now_james"] = {
+            "pass": "error" not in result,
+            "detail": {"the_one_task": result.get("the_one_task")},
+        }
+    except Exception as e:
+        checks["what_now_james"] = {"pass": False, "detail": str(e)}
+
+    # 3. what-now for m-laura
+    try:
+        result = await cmd_what_now(db, {"member_id": "m-laura"}, agent_id)
+        checks["what_now_laura"] = {
+            "pass": "error" not in result,
+            "detail": {"the_one_task": result.get("the_one_task")},
+        }
+    except Exception as e:
+        checks["what_now_laura"] = {"pass": False, "detail": str(e)}
+
+    # 4. Task create/verify/cleanup
+    test_task_id = None
+    try:
+        create_result = await cmd_task_create(db, {
+            "title": "__bootstrap_verify_test_task__",
+            "assignee": "m-james",
+        }, agent_id)
+        test_task_id = create_result.get("task_id")
+        if test_task_id:
+            row = await db.execute_fetchone(
+                "SELECT * FROM ops_tasks WHERE id = ?", [test_task_id]
+            )
+            task_found = row is not None
+            # Cleanup
+            await db.execute("DELETE FROM ops_tasks WHERE id = ?", [test_task_id])
+            await db.commit()
+            checks["task_lifecycle"] = {"pass": task_found, "detail": {"task_id": test_task_id}}
+        else:
+            checks["task_lifecycle"] = {"pass": False, "detail": "task_id not returned"}
+    except Exception as e:
+        checks["task_lifecycle"] = {"pass": False, "detail": str(e)}
+        if test_task_id:
+            try:
+                await db.execute("DELETE FROM ops_tasks WHERE id = ?", [test_task_id])
+                await db.commit()
+            except Exception:
+                pass
+
+    # 5. Custody logic
+    try:
+        config_row = await db.execute_fetchone(
+            "SELECT * FROM common_custody_configs WHERE active = 1 LIMIT 1"
+        )
+        if config_row:
+            parent_id = who_has_child(today, dict(config_row))
+            checks["custody"] = {"pass": parent_id is not None, "detail": {"parent_id": parent_id}}
+        else:
+            checks["custody"] = {"pass": True, "detail": "no custody config (ok for some households)"}
+    except Exception as e:
+        checks["custody"] = {"pass": False, "detail": str(e)}
+
+    # 6. Governance gate - coach agent should be blocked from task-create
+    try:
+        caps_config = load_agent_capabilities()
+        gov_config = load_governance()
+        # Check that coach is blocked from task-create
+        ok, msg = check_agent_allowlist("coach", "task-create", caps_config)
+        gate_status, gate_msg = check_governance_gate("coach", "task-create", gov_config)
+        coach_blocked = not ok or gate_status == "off"
+        checks["governance_coach_blocked"] = {
+            "pass": coach_blocked,
+            "detail": {"allowlist_ok": ok, "gate_status": gate_status},
+        }
+    except Exception as e:
+        checks["governance_coach_blocked"] = {"pass": False, "detail": str(e)}
+
+    # 7. Calendar context for both members
+    for member in ["m-james", "m-laura"]:
+        try:
+            cal_ctx = await build_calendar_context(db, today.isoformat(), today.isoformat(), member)
+            checks[f"calendar_context_{member.replace('-', '_')}"] = {
+                "pass": True,
+                "detail": {"length": len(cal_ctx) if cal_ctx else 0},
+            }
+        except Exception as e:
+            checks[f"calendar_context_{member.replace('-', '_')}"] = {"pass": False, "detail": str(e)}
+
+    # 8. Voice profiles for both members
+    for member in ["m-james", "m-laura"]:
+        try:
+            profiles = await get_profiles(db, member)
+            checks[f"voice_profiles_{member.replace('-', '_')}"] = {
+                "pass": True,
+                "detail": {"profile_count": len(profiles)},
+            }
+        except Exception as e:
+            checks[f"voice_profiles_{member.replace('-', '_')}"] = {"pass": False, "detail": str(e)}
+
+    # 9. Memory isolation test: save fact for m-james, search as m-laura, verify 0
+    test_memory_content = "__bootstrap_verify_memory_test_xyz123__"
+    try:
+        save_result = await save_memory_deduped(
+            db, test_memory_content, "preferences", "test", "m-james", "bootstrap-verify"
+        )
+        await db.commit()
+        # Search as m-laura - should NOT find it
+        laura_results = await search_memory(db, "xyz123", limit=10, member_id="m-laura")
+        laura_found = any(test_memory_content in r.get("content", "") for r in laura_results)
+        # Search as m-james - SHOULD find it
+        james_results = await search_memory(db, "xyz123", limit=10, member_id="m-james")
+        james_found = any(test_memory_content in r.get("content", "") for r in james_results)
+        # Cleanup
+        await db.execute(
+            "DELETE FROM mem_long_term WHERE content = ?", [test_memory_content]
+        )
+        await db.commit()
+        checks["memory_isolation"] = {
+            "pass": not laura_found,  # Laura should NOT see James's memory
+            "detail": {
+                "james_found": james_found,
+                "laura_found": laura_found,
+                "isolation_enforced": not laura_found,
+            },
+        }
+    except Exception as e:
+        checks["memory_isolation"] = {"pass": False, "detail": str(e)}
+        try:
+            await db.execute(
+                "DELETE FROM mem_long_term WHERE content = ?", [test_memory_content]
+            )
+            await db.commit()
+        except Exception:
+            pass
+
+    # 10. Optional bridge connectivity check
+    bridge_checks = {}
+    for bridge_name, env_key in [("james", "BLUEBUBBLES_JAMES_HOST"), ("laura", "BLUEBUBBLES_LAURA_HOST")]:
+        host = os.environ.get(env_key)
+        if host:
+            try:
+                result = subprocess.run(
+                    ["curl", "-sf", "--connect-timeout", "3", f"http://{host}/api/v1/server/info"],
+                    capture_output=True,
+                    timeout=5,
+                )
+                bridge_checks[bridge_name] = {"reachable": result.returncode == 0}
+            except Exception as e:
+                bridge_checks[bridge_name] = {"reachable": False, "error": str(e)}
+        else:
+            bridge_checks[bridge_name] = {"skipped": True, "reason": f"{env_key} not set"}
+
+    if bridge_checks:
+        checks["bridge_connectivity"] = {"pass": True, "detail": bridge_checks}
+
+    # Compute overall status
+    required_checks = [
+        "readiness", "what_now_james", "what_now_laura", "task_lifecycle",
+        "governance_coach_blocked", "memory_isolation",
+    ]
+    overall_pass = all(checks.get(c, {}).get("pass", False) for c in required_checks)
+
+    return {
+        "overall": "PASS" if overall_pass else "FAIL",
+        "checks": checks,
+        "timestamp": now_et().isoformat(),
+    }
+
+
+async def cmd_sensor_ingest(db, args: dict, agent_id: str) -> dict:
+    """Ingest sensor reading from bridge.
+
+    Receives {source, member_id, timestamp, classification, data}, stores reading,
+    auto-classifies m-laura as privileged.
+    """
+    from pib.db import next_id
+
+    source = args.get("source")
+    member_id = args.get("member_id")
+    timestamp = args.get("timestamp")
+    data = args.get("data", {})
+    classification = args.get("classification", "normal")
+    idempotency_key = args.get("idempotency_key")
+    confidence = args.get("confidence", 1.0)
+
+    if not source or not member_id:
+        return {"error": "source and member_id are required"}
+
+    # Auto-classify m-laura as privileged
+    if member_id == "m-laura":
+        classification = "privileged"
+
+    # Check for duplicate via idempotency key
+    if idempotency_key:
+        existing = await db.execute_fetchone(
+            "SELECT id FROM pib_sensor_readings WHERE idempotency_key = ?",
+            [idempotency_key],
+        )
+        if existing:
+            return {"status": "duplicate", "existing_id": existing["id"]}
+
+    # Generate sensor reading ID
+    reading_id = await next_id(db, "sns")
+
+    # Extract reading_type from source or data
+    reading_type = data.get("type") or source
+
+    # Store the reading
+    await db.execute(
+        """INSERT INTO pib_sensor_readings
+           (id, sensor_id, reading_type, member_id, timestamp, value, classification, confidence, idempotency_key)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        [
+            reading_id, source, reading_type, member_id,
+            timestamp or now_et().isoformat(),
+            json.dumps(data), classification, confidence, idempotency_key,
+        ],
+    )
+    await db.commit()
+
+    return {
+        "status": "stored",
+        "reading_id": reading_id,
+        "member_id": member_id,
+        "classification": classification,
+        "source": source,
+    }
+
+
 # ═══════════════════════════════════════════════════════════
 # COMMAND REGISTRY
 # ═══════════════════════════════════════════════════════════
@@ -942,6 +1232,8 @@ COMMAND_REGISTRY: dict[str, tuple[Any, str]] = {
     "migrate":              (cmd_migrate,               "admin"),
     "member-settings-get":  (cmd_member_settings_get,   "read"),
     "member-settings-set":  (cmd_member_settings_set,   "write"),
+    "bootstrap-verify":     (cmd_bootstrap_verify,      "read"),
+    "sensor-ingest":        (cmd_sensor_ingest,         "write"),
 }
 
 # Merge channel commands into registry

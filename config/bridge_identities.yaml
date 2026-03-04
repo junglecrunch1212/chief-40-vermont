@@ -1,0 +1,27 @@
+# Bridge Identities — maps physical bridges to household members and privacy
+#
+# Each personal Mac Mini runs Apple services (BlueBubbles, Shortcuts, HomeKit)
+# bound to a single Apple ID. This file documents the topology and controls
+# privacy classification at the sensor ingest layer.
+
+bridges:
+  james:
+    hostname: james-mini.local
+    member_id: m-james
+    services: [bluebubbles, shortcuts, homebridge, homekit]
+    apple_id_owner: james
+    privacy_class: normal  # James's data is normal privacy
+
+  laura:
+    hostname: laura-mini.local
+    member_id: m-laura
+    services: [bluebubbles, shortcuts]
+    apple_id_owner: laura
+    privacy_class: privileged  # Laura's data is privileged by default
+
+# Central CoS Mac Mini — runs the brain, no Apple ID binding
+cos:
+  hostname: pib-mini.local
+  services: [openclaw, pib-core, console, sensor-bus]
+  apple_id_owner: none
+  google_account: jrstice@gmail.com

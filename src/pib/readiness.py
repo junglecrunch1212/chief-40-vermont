@@ -5,11 +5,16 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+# Per-bridge BlueBubbles secrets (one per personal Mac Mini)
+BRIDGE_SECRETS = [
+    "BLUEBUBBLES_JAMES_SECRET",
+    "BLUEBUBBLES_LAURA_SECRET",
+]
+
 CRITICAL_ENV = [
     "ANTHROPIC_API_KEY",
     "TWILIO_AUTH_TOKEN",
     "TWILIO_PHONE_NUMBER",
-    "BLUEBUBBLES_SECRET",
     "SIRI_BEARER_TOKEN",
 ]
 
@@ -43,6 +48,16 @@ async def evaluate_readiness(db) -> dict:
 
     for key in CRITICAL_ENV:
         checks[f"env_{key.lower()}"] = {"ok": _is_set(key), "required": True}
+
+    # Per-bridge BlueBubbles secrets — at least one must be set for bridge support
+    any_bridge_secret = any(_is_set(key) for key in BRIDGE_SECRETS)
+    for key in BRIDGE_SECRETS:
+        checks[f"env_{key.lower()}"] = {"ok": _is_set(key), "required": False}
+    checks["env_bluebubbles_bridges"] = {
+        "ok": any_bridge_secret,
+        "required": True,
+        "detail": "At least one of BLUEBUBBLES_JAMES_SECRET or BLUEBUBBLES_LAURA_SECRET must be set",
+    }
 
     for key in OPTIONAL_ENV:
         checks[f"env_{key.lower()}"] = {"ok": _is_set(key), "required": False}

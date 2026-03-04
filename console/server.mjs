@@ -784,6 +784,151 @@ app.post("/api/comms/:id/snooze", requireMember, (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════
+// BRIDGE ENDPOINTS — Sensor Ingest, BlueBubbles Webhooks, Task Capture
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * Validate Bearer token against SIRI_BEARER_TOKEN env var.
+ * Returns true if valid, false otherwise.
+ */
+function validateBearerToken(req) {
+  const authHeader = req.headers.authorization || "";
+  if (!authHeader.startsWith("Bearer ")) return false;
+  const token = authHeader.slice(7);
+  const expected = process.env.SIRI_BEARER_TOKEN || "";
+  return expected && token === expected;
+}
+
+/**
+ * Privacy filter helper for sensor queries.
+ * Excludes classification=privileged unless req.memberId matches data member_id.
+ */
+function privacyFilter(memberId) {
+  return memberId
+    ? `(classification != 'privileged' OR member_id = '${memberId}')`
+    : `classification != 'privileged'`;
+}
+
+// --- Sensor Ingest ---
+// POST /api/sensors/ingest — validates Bearer token, routes to Python CLI
+app.post("/api/sensors/ingest", (req, res) => {
+  if (!validateBearerToken(req)) {
+    return res.status(401).json({ error: "Invalid or missing Bearer token" });
+  }
+
+  const { source, member_id, timestamp, classification, data } = req.body;
+  if (!source || !member_id) {
+    return res.status(400).json({ error: "source and member_id are required" });
+  }
+
+  // Generate idempotency key from payload hash
+  const idempotencyKey = `${source}-${member_id}-${timestamp || Date.now()}-${crypto.randomUUID().slice(0,8)}`;
+
+  const result = runCLI("sensor-ingest", {
+    source,
+    member_id,
+    timestamp: timestamp || new Date().toISOString(),
+    classification: classification || "normal",
+    data: data || {},
+    idempotency_key: idempotencyKey,
+  });
+
+  res.json(result);
+});
+
+// --- BlueBubbles Webhook (per-bridge) ---
+// POST /api/webhooks/bluebubbles/:bridgeId — validates per-bridge secret, forces member_id
+app.post("/api/webhooks/bluebubbles/:bridgeId", (req, res) => {
+  const bridgeId = req.params.bridgeId.toLowerCase();
+
+  // Map bridge_id to member_id
+  const bridgeMemberMap = { james: "m-james", laura: "m-laura" };
+  if (!bridgeMemberMap[bridgeId]) {
+    return res.status(400).json({ error: `Unknown bridge: ${bridgeId}` });
+  }
+
+  // Validate per-bridge secret from header or query param
+  const providedSecret = req.headers["x-bluebubbles-secret"]
+    || req.query.secret
+    || req.body?.api_key
+    || "";
+  const envKey = `BLUEBUBBLES_${bridgeId.toUpperCase()}_SECRET`;
+  const expectedSecret = process.env[envKey] || "";
+
+  if (!expectedSecret) {
+    return res.status(500).json({ error: `${envKey} not configured` });
+  }
+  if (providedSecret !== expectedSecret) {
+    return res.status(401).json({ error: "Invalid API key", bridge: bridgeId });
+  }
+
+  // Route to CLI with bridge_id (forces member_id)
+  const result = runCLI("webhook-receive", {
+    bridge_id: bridgeId,
+    api_key: providedSecret,
+    payload: req.body,
+  });
+
+  res.json(result);
+});
+
+// --- Task Capture ---
+// POST /api/capture/task — validates Bearer token, routes to Python CLI
+app.post("/api/capture/task", (req, res) => {
+  if (!validateBearerToken(req)) {
+    return res.status(401).json({ error: "Invalid or missing Bearer token" });
+  }
+
+  const { member_id, source, text, timestamp } = req.body;
+  if (!member_id || !text) {
+    return res.status(400).json({ error: "member_id and text are required" });
+  }
+
+  const result = runCLI("capture", {
+    member_id,
+    source: source || "siri",
+    text,
+  }, member_id);
+
+  res.json(result);
+});
+
+// --- Sensor Data Query (privacy-fenced) ---
+app.get("/api/sensors", optionalMember, (req, res) => {
+  const d = getDB();
+  const memberId = req.memberId;
+  const readingType = req.query.type;
+  const since = req.query.since;
+  const limit = parseInt(req.query.limit || "100", 10);
+
+  try {
+    let sql = `SELECT * FROM pib_sensor_readings WHERE ${privacyFilter(memberId)}`;
+    const params = [];
+
+    if (readingType) {
+      sql += " AND reading_type = ?";
+      params.push(readingType);
+    }
+    if (since) {
+      sql += " AND timestamp >= ?";
+      params.push(since);
+    }
+    if (memberId && req.query.mine === "true") {
+      sql += " AND member_id = ?";
+      params.push(memberId);
+    }
+
+    sql += " ORDER BY timestamp DESC LIMIT ?";
+    params.push(limit);
+
+    const readings = d.prepare(sql).all(...params);
+    res.json({ readings });
+  } catch (e) {
+    res.json({ readings: [], error: e.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
 // START
 // ═══════════════════════════════════════════════════════════
 

@@ -6,6 +6,7 @@ import os
 from datetime import datetime
 
 from pib.db import audit_log, next_id
+from pib.tz import now_et
 from pib.project.gates import GateViolation, check_reputational_gate
 from pib.project.rate_limit import check_rate_limit
 
@@ -149,7 +150,7 @@ Sign as: James Stice (via PIB)"""
     # Insert into ops_comms with draft_status='pending'
     try:
         comms_id = await next_id(db, "c")
-        now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+        now = now_et().isoformat()
         await db.execute(
             """INSERT INTO ops_comms
                (id, date, channel, direction, from_addr, to_addr,
@@ -225,7 +226,7 @@ Identify as PIB on behalf of James Stice."""
 
     try:
         comms_id = await next_id(db, "c")
-        now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+        now = now_et().isoformat()
         await db.execute(
             """INSERT INTO ops_comms
                (id, date, channel, direction, to_addr,

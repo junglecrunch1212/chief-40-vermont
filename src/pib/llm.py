@@ -67,11 +67,6 @@ COMMS_TRIGGERS = {
 CAPTURE_TRIGGERS = {
     "capture", "note", "remember this", "save this", "second brain", "notebook",
     "idea", "recipe", "bookmark", "thought", "jot down", "write down",
-    "my notes", "my ideas", "my captures", "my bookmarks",
-}
-CAPTURE_TRIGGERS = {
-    "capture", "note", "remember this", "save this", "second brain", "notebook",
-    "idea", "recipe", "bookmark", "thought", "jot down", "write down",
     "my notes", "my ideas", "my captures", "my recipes", "my bookmarks",
 }
 PROJECT_TRIGGERS = {

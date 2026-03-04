@@ -6,6 +6,7 @@ import os
 from datetime import datetime
 
 from pib.db import audit_log, get_config, next_id
+from pib.tz import now_et
 
 log = logging.getLogger(__name__)
 
@@ -351,7 +352,7 @@ def _validate_plan(plan: dict) -> list[str]:
 async def _persist_plan(db, project_id: str, brief: str, plan: dict, requested_by: str):
     """Write project, phases, steps, and gates to the database."""
     title = plan.get("title", brief[:60])
-    now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = now_et().isoformat()
 
     # Determine permissions from plan suggestions
     perms = plan.get("suggested_permissions", [])

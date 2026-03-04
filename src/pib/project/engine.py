@@ -5,6 +5,7 @@ import logging
 from datetime import datetime
 
 from pib.db import audit_log, next_id
+from pib.tz import now_et
 
 log = logging.getLogger(__name__)
 
@@ -79,7 +80,7 @@ async def advance_project(db, project_id: str) -> dict:
                 # Auto-approve inform gates
                 await db.execute(
                     "UPDATE proj_gates SET status = 'approved', decided_at = ?, decision_notes = 'auto-inform' WHERE id = ?",
-                    [datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"), gate["id"]],
+                    [now_et().isoformat(), gate["id"]],
                 )
                 await db.commit()
 
@@ -153,7 +154,7 @@ async def _get_next_step(db, phase_id: str) -> dict | None:
 async def _execute_step(db, project: dict, step: dict) -> dict:
     """Execute a single step based on its type."""
     step_type = step["step_type"]
-    now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = now_et().isoformat()
 
     # Mark step active
     await db.execute(
@@ -274,7 +275,7 @@ async def _execute_auto_step(db, project: dict, step: dict) -> dict:
     try:
         result = await dispatch_tool(db, project["id"], step, project)
 
-        now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+        now = now_et().isoformat()
 
         # If the tool created a human task, mark step as waiting
         if result.get("data", {}).get("needs_human"):
@@ -313,7 +314,7 @@ async def _execute_auto_step(db, project: dict, step: dict) -> dict:
 
 async def _activate_project(db, project_id: str):
     """Set project to active status."""
-    now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = now_et().isoformat()
     await db.execute(
         "UPDATE proj_projects SET status = 'active', updated_at = ? WHERE id = ?",
         [now, project_id],
@@ -325,7 +326,7 @@ async def _activate_project(db, project_id: str):
 
 async def _activate_phase(db, phase_id: str):
     """Set phase to active status."""
-    now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = now_et().isoformat()
     await db.execute(
         "UPDATE proj_phases SET status = 'active', started_at = ? WHERE id = ?",
         [now, phase_id],
@@ -335,7 +336,7 @@ async def _activate_phase(db, phase_id: str):
 
 async def _complete_phase(db, phase_id: str):
     """Set phase to completed status."""
-    now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = now_et().isoformat()
     await db.execute(
         "UPDATE proj_phases SET status = 'completed', completed_at = ? WHERE id = ?",
         [now, phase_id],
@@ -365,7 +366,7 @@ async def _try_complete_project(db, project_id: str):
 
 async def _close_project(db, project_id: str):
     """Close out a project: archive research, generate summary, mark completed."""
-    now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = now_et().isoformat()
 
     # Archive research to cap_captures (graceful — cap_captures may not exist)
     try:
@@ -403,7 +404,7 @@ async def _close_project(db, project_id: str):
 
 async def _fail_step(db, step_id: str, error_message: str, project_id: str):
     """Mark a step as failed and log to dead letter queue."""
-    now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = now_et().isoformat()
     await db.execute(
         "UPDATE proj_steps SET status = 'failed', result_summary = ? WHERE id = ?",
         [error_message[:500], step_id],
@@ -438,7 +439,7 @@ async def on_task_completed(db, task_id: str):
         return
 
     step = dict(step)
-    now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = now_et().isoformat()
     await db.execute(
         "UPDATE proj_steps SET status = 'completed', completed_at = ? WHERE id = ?",
         [now, step["id"]],

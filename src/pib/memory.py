@@ -71,6 +71,38 @@ def is_negation_of(new_content: str, existing_content: str) -> bool:
     return False
 
 
+# Stopwords to ignore when comparing sentence structure
+_STOPWORDS = {"a", "an", "the", "is", "are", "was", "were", "be", "been", "being",
+              "to", "of", "in", "for", "on", "with", "at", "by", "from", "and", "or"}
+
+
+def has_value_change(new_content: str, existing_content: str) -> bool:
+    """Detect when sentence structure is same but a key value differs.
+
+    'James likes sushi' vs 'James likes pizza' — same structure, different object.
+    Only triggers when exactly 1-2 content words differ and the rest overlap heavily.
+    """
+    new_words = [_basic_stem(w) for w in new_content.lower().split() if w not in _STOPWORDS and w not in NEGATION_TOKENS]
+    old_words = [_basic_stem(w) for w in existing_content.lower().split() if w not in _STOPWORDS and w not in NEGATION_TOKENS]
+
+    if not new_words or not old_words:
+        return False
+
+    new_set, old_set = set(new_words), set(old_words)
+    shared = new_set & old_set
+    only_new = new_set - old_set
+    only_old = old_set - new_set
+
+    # High structural overlap (>= 60% shared) with exactly 1-2 words swapped on each side
+    if len(shared) < 1:
+        return False
+    overlap = len(shared) / max(len(new_set | old_set), 1)
+    if overlap >= 0.40 and 0 < len(only_new) <= 2 and 0 < len(only_old) <= 2:
+        return True
+
+    return False
+
+
 # ─── Memory Dedup + Save ───
 
 async def save_memory_deduped(
@@ -92,7 +124,7 @@ async def save_memory_deduped(
         overlap = len(filtered_new & filtered_existing) / max(len(filtered_new | filtered_existing), 1)
 
         if overlap > 0.60:
-            if is_negation_of(content, row["content"]):
+            if is_negation_of(content, row["content"]) or has_value_change(content, row["content"]):
                 cursor = await db.execute(
                     "INSERT INTO mem_long_term (content, category, domain, member_id, source) "
                     "VALUES (?,?,?,?,?)",

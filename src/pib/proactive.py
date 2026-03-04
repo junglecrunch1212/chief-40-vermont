@@ -793,3 +793,28 @@ async def build_morning_digest_data(db, member_id: str) -> dict:
         "completions_today": wn.completions_today,
         "high_priority_captures": high_priority_captures,
     }
+
+
+# ─── Proactive Dispatch via Outbound Router ───
+
+
+async def dispatch_proactive_message(
+    db, member_id: str, message: str, trigger_type: str
+) -> dict | None:
+    """Dispatch a proactive message through the outbound router.
+
+    Delegates to comms.dispatch_proactive_message which handles channel
+    selection and routing. Guardrails (quiet hours, rate limits, focus mode)
+    are already checked by can_send_proactive() before this is called.
+
+    Args:
+        db: Database connection
+        member_id: Recipient member ID
+        message: Message body to send
+        trigger_type: The proactive trigger name (for audit trail)
+
+    Returns:
+        Route result dict, or None if routing unavailable
+    """
+    from pib.comms import dispatch_proactive_message as _dispatch
+    return await _dispatch(db, member_id, message, trigger_type)

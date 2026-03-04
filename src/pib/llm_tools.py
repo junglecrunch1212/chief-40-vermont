@@ -473,7 +473,21 @@ async def _tool_send_message(db, inp: dict, member_id: str) -> dict:
         )
         await db.commit()
         return {"queued_for_approval": approval_id, "to": to}
-    return {"status": "queued", "to": to, "content": inp["content"]}
+    # Route through channel registry for household members
+    try:
+        from pib.comms import determine_best_channel
+        from pib.outbound_router import route_outbound
+        channel_id = await determine_best_channel(db, member_id, recipient_id=to)
+        result = await route_outbound(
+            db,
+            channel_id=channel_id,
+            message=inp["content"],
+            member_id=to,
+        )
+        return {"status": result.get("status", "queued"), "to": to, "channel": channel_id, "content": inp["content"]}
+    except Exception as e:
+        log.debug(f"Outbound routing unavailable for send_message, falling back: {e}")
+        return {"status": "queued", "to": to, "content": inp["content"]}
 
 
 async def _tool_query_schedule(db, inp: dict, member_id: str) -> dict:

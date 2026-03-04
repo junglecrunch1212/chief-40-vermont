@@ -86,6 +86,7 @@ const NAV = [
   { id:'tasks', icon:'check-square', label:'Tasks' },
   { id:'schedule', icon:'calendar', label:'Schedule' },
   { id:'lists', icon:'list', label:'Lists' },
+  { id:'comms', icon:'inbox', label:'Comms' },
   { id:'chat', icon:'message-circle', label:'Chat' },
   { id:'scoreboard', icon:'trophy', label:'Scoreboard' },
   { id:'people', icon:'users', label:'People' },
@@ -93,8 +94,8 @@ const NAV = [
 ];
 const HIDDEN_FOR_CHILD = ['tasks','people','settings'];
 const DOMAIN_BADGE = {household:'badge-lav',health:'badge-teal',finance:'badge-warn',family:'badge-pink',work:'badge-info',admin:'badge-grn'};
-const SETTINGS_TABS = ['health','costs','models','sources','phases','config','budget','household','permissions','coaching','gates','memory'];
-const SETTINGS_LABELS = {health:'System Health',costs:'Costs',models:'AI Models',sources:'Sources',phases:'Life Phases',config:'Config',budget:'Budget',household:'Household',permissions:'Permissions',coaching:'Coaching',gates:'Gates',memory:'Memory'};
+const SETTINGS_TABS = ['health','costs','models','sources','phases','config','budget','household','channels','permissions','coaching','gates','memory'];
+const SETTINGS_LABELS = {health:'System Health',costs:'Costs',models:'AI Models',sources:'Sources',phases:'Life Phases',config:'Config',budget:'Budget',household:'Household',channels:'Channels',permissions:'Permissions',coaching:'Coaching',gates:'Gates',memory:'Memory'};
 
 let currentPage = 'today';
 let currentActor = localStorage.getItem('pib-actor') || 'm-james';
@@ -124,6 +125,7 @@ const ICONS = {
   'message-circle':'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
   trophy:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>',
   users:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
+  inbox:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>',
   settings:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
 };
 
@@ -174,7 +176,7 @@ function navigate(page) { currentPage=page; if(currentActor==='m-charlie'&&HIDDE
 function renderPage() {
   const m = document.getElementById('main');
   m.innerHTML = loading('Loading...');
-  const pages = {today:renderToday,tasks:renderTasks,schedule:renderSchedule,lists:renderLists,chat:renderChat,scoreboard:renderScoreboard,people:renderPeople,settings:renderSettings};
+  const pages = {today:renderToday,tasks:renderTasks,schedule:renderSchedule,lists:renderLists,comms:renderComms,chat:renderChat,scoreboard:renderScoreboard,people:renderPeople,settings:renderSettings};
   (pages[currentPage]||renderToday)();
 }
 
@@ -307,6 +309,124 @@ async function renderLists() {
   window._listAdd = async()=>{ const inp=document.getElementById('list-input'); if(!inp||!inp.value.trim()) return; try{ await POST(`/api/lists/${listTab}/items`,{text:inp.value}); load(listTab); }catch(e){console.error(e);} };
   window._listToggle = async(id)=>{ try{ await POST(`/api/lists/${listTab}/items/${id}/toggle`,{}); load(listTab); }catch(e){console.error(e);} };
   load(listTab);
+}
+
+// ── COMMS INBOX ──
+async function renderComms() {
+  const m = document.getElementById('main');
+  m.innerHTML = loading('Loading comms...');
+  let activeChannel = 'all';
+  let activeFilter = 'pending';
+  let activeBatch = 'all';
+
+  async function load() {
+    try {
+      const [channelsRes, inboxRes] = await Promise.all([
+        GET('/api/channels'),
+        GET(`/api/comms/inbox${activeFilter !== 'all' ? '?status=' + activeFilter : ''}${activeBatch !== 'all' ? (activeFilter !== 'all' ? '&' : '?') + 'batch_window=' + activeBatch : ''}`),
+      ]);
+      const channels = channelsRes.channels || [];
+      let items = inboxRes.items || [];
+      if (activeChannel !== 'all') items = items.filter(i => i.channel_id === activeChannel);
+
+      // Group by batch window
+      const groups = { morning: [], midday: [], evening: [], other: [] };
+      for (const item of items) {
+        const bw = item.batch_window || 'other';
+        (groups[bw] || groups.other).push(item);
+      }
+
+      const healthDot = (ch) => {
+        const s = ch.health_status || 'unknown';
+        const color = s === 'healthy' ? 'var(--grn)' : s === 'degraded' ? 'var(--warn)' : s === 'down' ? 'var(--err)' : 'var(--tx4)';
+        return `<div style="width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0"></div>`;
+      };
+
+      m.innerHTML = `<div class="fi" style="display:flex;gap:24px">
+        <!-- Channel Sidebar -->
+        <div style="width:200px;min-width:200px;flex-shrink:0">
+          <div class="section-label">Channels</div>
+          <button class="nav-btn ${activeChannel==='all'?'active':''}" onclick="window._commsChannel('all')" style="margin-bottom:4px">
+            <span class="nav-icon">📥 All Channels</span>
+          </button>
+          ${channels.map(ch => `<button class="nav-btn ${activeChannel===ch.id?'active':''}" onclick="window._commsChannel('${esc(ch.id)}')" style="margin-bottom:2px">
+            <span class="nav-icon">${healthDot(ch)} ${esc(ch.icon||'📡')} ${esc(ch.display_name)}</span>
+            ${ch.enabled ? '' : '<span class="badge badge-warn" style="font-size:9px">off</span>'}
+          </button>`).join('')}
+        </div>
+        <!-- Main Content -->
+        <div style="flex:1;min-width:0">
+          <h1 class="page-title">Comms Inbox</h1>
+          <!-- Filter Bar -->
+          <div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap">
+            <div class="pill-tabs" style="margin-bottom:0">
+              ${['all','pending','draft','snoozed','done'].map(f => `<button class="pill ${f===activeFilter?'active':''}" onclick="window._commsFilter('${f}')">${f}</button>`).join('')}
+            </div>
+            <div class="pill-tabs" style="margin-bottom:0;margin-left:auto">
+              ${['all','morning','midday','evening'].map(b => `<button class="pill ${b===activeBatch?'active':''}" onclick="window._commsBatch('${b}')">${b}</button>`).join('')}
+            </div>
+          </div>
+          <!-- Grouped Items -->
+          ${['morning','midday','evening','other'].map(bw => {
+            const g = groups[bw];
+            if (!g || !g.length) return '';
+            return `<div style="margin-bottom:24px">
+              <div class="section-label">${bw === 'other' ? 'Unscheduled' : bw.charAt(0).toUpperCase() + bw.slice(1)} Batch</div>
+              <div style="display:grid;gap:8px">
+                ${g.map(item => `<div class="card" style="padding:14px 18px">
+                  <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+                    <div style="flex:1;min-width:0">
+                      <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+                        <span style="font-size:14px">${esc(item.channel_icon||'📡')}</span>
+                        <span style="font-size:13px;color:var(--tx3)">${esc(item.channel_name||item.channel_id||'')}</span>
+                        <span class="badge ${item.status==='pending'?'badge-warn':item.status==='draft'?'badge-lav':item.status==='done'?'badge-grn':'badge-info'}">${esc(item.status||'')}</span>
+                        ${item.urgency==='high'?'<span class="badge badge-err">urgent</span>':''}
+                      </div>
+                      <div style="font-weight:500;font-size:15px;margin-bottom:4px">${esc(item.subject||item.title||item.summary||'(no subject)')}</div>
+                      <div style="font-size:13px;color:var(--tx2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(item.content||item.body||'')}</div>
+                      <div style="font-size:11px;color:var(--tx4);margin-top:6px">${esc(item.created_at||'')}</div>
+                    </div>
+                    <div style="display:flex;gap:6px;flex-shrink:0">
+                      ${item.status==='draft'?`
+                        <button class="btn-g btn-sm" onclick="window._commsAction('approve','${esc(item.id)}')">Approve</button>
+                        <button class="btn-d btn-sm" onclick="window._commsAction('reject','${esc(item.id)}')">Reject</button>
+                      `:`
+                        <button class="btn-p btn-sm" onclick="window._commsAction('respond','${esc(item.id)}')">Respond</button>
+                        <button class="btn-s btn-sm" onclick="window._commsAction('snooze','${esc(item.id)}')">Snooze</button>
+                        <button class="btn-s btn-sm" onclick="window._commsAction('archive','${esc(item.id)}')">Archive</button>
+                      `}
+                    </div>
+                  </div>
+                </div>`).join('')}
+              </div>
+            </div>`;
+          }).join('')}
+          ${items.length === 0 ? '<div class="card-flat" style="text-align:center;padding:48px;color:var(--tx3)">No messages match your filters.</div>' : ''}
+        </div>
+      </div>`;
+    } catch(e) {
+      m.innerHTML = `<div class="fi"><h1 class="page-title">Comms Inbox</h1><div class="card-flat" style="text-align:center;padding:48px;color:var(--tx3)">Could not load comms. ${esc(e.message)}</div></div>`;
+    }
+  }
+
+  window._commsChannel = (ch) => { activeChannel = ch; load(); };
+  window._commsFilter = (f) => { activeFilter = f; load(); };
+  window._commsBatch = (b) => { activeBatch = b; load(); };
+  window._commsAction = async (action, id) => {
+    try {
+      if (action === 'approve') await POST(`/api/comms/${id}/approve-draft`, {});
+      else if (action === 'respond') await POST(`/api/comms/${id}/respond`, {});
+      else if (action === 'snooze') {
+        const until = prompt('Snooze until (YYYY-MM-DD):');
+        if (!until) return;
+        await POST(`/api/comms/${id}/snooze`, { until });
+      }
+      else if (action === 'archive') await POST(`/api/comms/${id}/respond`, {});
+      else if (action === 'reject') await POST(`/api/comms/${id}/respond`, {});
+      load();
+    } catch(e) { console.error(e); }
+  };
+  load();
 }
 
 // ── CHAT ──
@@ -537,6 +657,26 @@ async function renderSettings() {
             <td style="font-family:var(--mono);font-size:13px">${mb.velocity_cap??'\u2014'}</td>
             <td style="font-size:12px;color:var(--tx2)">${(mb.channels||[]).map(ch=>`<span class="badge badge-info" style="margin:2px">${esc(ch)}</span>`).join('')||'\u2014'}</td>
           </tr>`).join('')}</tbody></table></div>`;
+      } else if (settingsTab==='channels') {
+        const d = await GET('/api/channels');
+        const channels = d.channels||[];
+        sc.innerHTML = `<div class="card-flat"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h3 style="font-size:16px;font-weight:600;font-family:var(--head)">Channel Management</h3></div>
+          <table><thead><tr>${['Channel','Category','Status','Health','Last Check','Failures','Setup',''].map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>
+          ${channels.map(ch=>{
+            const hColor = ch.health_status==='healthy'?'var(--grn)':ch.health_status==='degraded'?'var(--warn)':'var(--err)';
+            return `<tr>
+              <td><div style="display:flex;align-items:center;gap:8px"><span style="font-size:18px">${esc(ch.icon||'📡')}</span><div><div style="font-weight:500">${esc(ch.display_name)}</div><div style="font-size:11px;color:var(--tx4);font-family:var(--mono)">${esc(ch.id)}</div></div></div></td>
+              <td><span class="badge badge-info">${esc(ch.category||'')}</span></td>
+              <td><div onclick="window._channelToggle('${esc(ch.id)}',${!ch.enabled})" style="width:42px;height:24px;border-radius:12px;cursor:pointer;position:relative;${ch.enabled?'background:var(--pink)':'background:var(--bd)'}"><div style="width:18px;height:18px;border-radius:50%;background:#fff;position:absolute;top:3px;left:${ch.enabled?'21px':'3px'};transition:left .2s;box-shadow:0 1px 3px rgba(0,0,0,0.15)"></div></div></td>
+              <td><div style="display:flex;align-items:center;gap:6px"><div style="width:8px;height:8px;border-radius:50%;background:${hColor}"></div><span style="font-size:13px">${esc(ch.health_status||'unknown')}</span></div></td>
+              <td style="font-size:12px;color:var(--tx3);font-family:var(--mono)">${esc(ch.last_check||'never')}</td>
+              <td style="font-family:var(--mono);text-align:center;color:${(ch.consecutive_failures||0)>0?'var(--err)':'var(--tx3)'}">${ch.consecutive_failures||0}</td>
+              <td><span class="badge ${ch.setup_complete?'badge-grn':'badge-warn'}">${ch.setup_complete?'Complete':'Incomplete'}</span></td>
+              <td>${!ch.setup_complete?`<button class="btn-p btn-sm" onclick="window._channelOnboard('${esc(ch.id)}')">Setup</button>`:''}</td>
+            </tr>`;
+          }).join('')}</tbody></table></div>`;
+        window._channelToggle = async(id, enable)=>{ try{ await POST(`/api/channels/${id}/${enable?'enable':'disable'}`,{}); load(settingsTab); }catch(e){console.error(e);} };
+        window._channelOnboard = (id)=>{ alert('Channel onboarding wizard for '+id+' — coming soon'); };
       } else if (settingsTab==='permissions') {
         const d = await GET('/api/settings/permissions');
         const agents = d.agents||[];

@@ -619,6 +619,139 @@ app.get("/api/scoreboard", optionalMember, (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════
+// CHANNEL REGISTRY & COMMS INBOX
+// ═══════════════════════════════════════════════════════════
+
+// --- List all channels with health status ---
+app.get("/api/channels", (_req, res) => {
+  const d = getDB();
+  try {
+    const channels = d.prepare(`
+      SELECT c.id, c.display_name, c.icon, c.category, c.enabled, c.setup_complete,
+             h.health_status, h.last_check, h.consecutive_failures
+      FROM comms_channels c
+      LEFT JOIN comms_channel_health h ON h.channel_id = c.id
+      ORDER BY c.category, c.display_name
+    `).all();
+    res.json({ channels });
+  } catch (e) {
+    res.json({ channels: [], error: e.message });
+  }
+});
+
+// --- Single channel detail ---
+app.get("/api/channels/:id", (req, res) => {
+  const d = getDB();
+  try {
+    const channel = d.prepare(`
+      SELECT c.*, h.health_status, h.last_check, h.consecutive_failures,
+             h.last_error, h.avg_latency_ms
+      FROM comms_channels c
+      LEFT JOIN comms_channel_health h ON h.channel_id = c.id
+      WHERE c.id = ?
+    `).get(req.params.id);
+    if (!channel) return res.status(404).json({ error: "Channel not found" });
+
+    // Get capabilities
+    let capabilities = [];
+    try {
+      capabilities = d.prepare(
+        "SELECT capability FROM comms_channel_capabilities WHERE channel_id = ?"
+      ).all(req.params.id);
+    } catch { /* table may not exist */ }
+
+    // Get member access
+    let memberAccess = [];
+    try {
+      memberAccess = d.prepare(
+        "SELECT member_id, access_level FROM comms_channel_members WHERE channel_id = ?"
+      ).all(req.params.id);
+    } catch { /* table may not exist */ }
+
+    res.json({ channel, capabilities, memberAccess });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// --- Channel-specific inbox ---
+app.get("/api/channels/:id/inbox", requireMember, (req, res) => {
+  const d = getDB();
+  try {
+    const items = d.prepare(`
+      SELECT * FROM ops_comms
+      WHERE channel_id = ? AND member_id = ?
+      ORDER BY created_at DESC LIMIT 100
+    `).all(req.params.id, req.memberId);
+    res.json({ items });
+  } catch (e) {
+    res.json({ items: [], error: e.message });
+  }
+});
+
+// --- Enable channel ---
+app.post("/api/channels/:id/enable", requireMember, (req, res) => {
+  const result = runCLI("channel-enable", { channel_id: req.params.id }, req.memberId);
+  res.json(result);
+});
+
+// --- Disable channel ---
+app.post("/api/channels/:id/disable", requireMember, (req, res) => {
+  const result = runCLI("channel-disable", { channel_id: req.params.id }, req.memberId);
+  res.json(result);
+});
+
+// --- Unified comms inbox ---
+app.get("/api/comms/inbox", requireMember, (req, res) => {
+  const d = getDB();
+  const batchWindow = req.query.batch_window || null;
+  const status = req.query.status || null;
+  try {
+    let sql = `
+      SELECT oc.*, cc.display_name as channel_name, cc.icon as channel_icon
+      FROM ops_comms oc
+      LEFT JOIN comms_channels cc ON cc.id = oc.channel_id
+      WHERE oc.member_id = ?
+    `;
+    const params = [req.memberId];
+
+    if (batchWindow) {
+      sql += " AND oc.batch_window = ?";
+      params.push(batchWindow);
+    }
+    if (status) {
+      sql += " AND oc.status = ?";
+      params.push(status);
+    }
+
+    sql += " ORDER BY oc.created_at DESC LIMIT 200";
+    const items = d.prepare(sql).all(...params);
+    res.json({ items });
+  } catch (e) {
+    res.json({ items: [], error: e.message });
+  }
+});
+
+// --- Approve draft ---
+app.post("/api/comms/:id/approve-draft", requireMember, (req, res) => {
+  const result = runCLI("comms-approve-draft", { comms_id: req.params.id }, req.memberId);
+  res.json(result);
+});
+
+// --- Mark as responded ---
+app.post("/api/comms/:id/respond", requireMember, (req, res) => {
+  const result = runCLI("comms-respond", { comms_id: req.params.id }, req.memberId);
+  res.json(result);
+});
+
+// --- Snooze ---
+app.post("/api/comms/:id/snooze", requireMember, (req, res) => {
+  const until = req.query.until || req.body.until;
+  const result = runCLI("comms-snooze", { comms_id: req.params.id, until }, req.memberId);
+  res.json(result);
+});
+
+// ═══════════════════════════════════════════════════════════
 // START
 // ═══════════════════════════════════════════════════════════
 

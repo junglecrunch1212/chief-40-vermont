@@ -104,6 +104,22 @@ async def get_comms_inbox(
     conditions = ["visibility = ?"]
     params: list = [visibility]
 
+    # Scope to member's accessible channels if channel registry exists
+    if member_id:
+        try:
+            accessible_rows = await db.execute_fetchall(
+                "SELECT channel_id FROM comms_channel_member_access "
+                "WHERE member_id = ? AND show_in_inbox = 1",
+                [member_id],
+            )
+            if accessible_rows:
+                channel_ids = [r["channel_id"] for r in accessible_rows]
+                placeholders = ",".join("?" * len(channel_ids))
+                conditions.append(f"channel IN ({placeholders})")
+                params.extend(channel_ids)
+        except Exception:
+            pass  # Table may not exist yet — no scoping
+
     if needs_response is not None:
         conditions.append("needs_response = ?")
         params.append(1 if needs_response else 0)
@@ -389,8 +405,12 @@ async def approve_draft(db, comm_id: str, edited_body: str | None = None) -> dic
     await audit_log(db, "ops_comms", "UPDATE", comm_id, actor="user",
                     new_values=json.dumps({"action": "draft_approved", "draft_status": "approved", "edited": edited_body is not None}))
 
-    # Return updated comm for sending
-    return await get_comm_by_id(db, comm_id)
+    # Route through outbound_router if channel registry is available
+    updated_comm = await get_comm_by_id(db, comm_id)
+    send_result = await _try_route_outbound(db, updated_comm, final_body)
+    if send_result:
+        updated_comm["send_result"] = send_result
+    return updated_comm
 
 
 async def reject_draft(db, comm_id: str) -> bool:
@@ -481,6 +501,115 @@ async def capture_manual(db, member_id: str, data: dict) -> str:
     await audit_log(db, "ops_comms", "INSERT", comm_id, actor="user",
                     source="manual_capture")
     return comm_id
+
+
+# ─── Outbound Router Integration ───
+
+
+async def _try_route_outbound(db, comm: dict, body: str) -> dict | None:
+    """Attempt to route an approved draft through outbound_router.
+
+    Returns the send result dict, or None if the channel registry
+    isn't available (graceful fallback to old behavior).
+    """
+    try:
+        from pib.outbound_router import route_outbound
+        channel_id = comm.get("channel") or "unknown"
+        result = await route_outbound(
+            db,
+            channel_id=channel_id,
+            message=body,
+            member_id=comm.get("member_id"),
+            reply_to=comm.get("source_ref"),
+        )
+        log.info(f"Outbound route for comm {comm['id']}: {result.get('status')}")
+        return result
+    except Exception as e:
+        # Channel registry tables may not exist yet — fall back gracefully
+        log.debug(f"Outbound routing unavailable, falling back: {e}")
+        return None
+
+
+async def determine_best_channel(db, member_id: str, recipient_id: str | None = None) -> str:
+    """Query channel registry for the best sendable channel for a member.
+
+    Priority order:
+    1. Member's reply_channel_default (from comms_channel_member_access)
+    2. Highest-priority enabled channel with outbound capability
+    3. Fallback to 'imessage' if registry unavailable
+
+    Args:
+        db: Database connection
+        member_id: The requesting member
+        recipient_id: The recipient member (if different from requester)
+
+    Returns:
+        Channel ID string
+    """
+    target = recipient_id or member_id
+    try:
+        # Try member's default reply channel first
+        row = await db.execute_fetchone(
+            """SELECT cma.channel_id FROM comms_channel_member_access cma
+               JOIN comms_channels cc ON cma.channel_id = cc.id
+               WHERE cma.member_id = ? AND cma.access_level IN ('write','admin')
+               AND cc.enabled = 1
+               ORDER BY cc.priority ASC
+               LIMIT 1""",
+            [target],
+        )
+        if row:
+            return row["channel_id"]
+    except Exception:
+        pass  # Tables may not exist
+
+    try:
+        # Fall back to any enabled outbound channel
+        from pib.channels import ChannelRegistry
+        registry = ChannelRegistry(db)
+        await registry.load()
+        sendable = registry.get_sendable()
+        if sendable:
+            return sendable[0].id
+    except Exception:
+        pass
+
+    return "imessage"
+
+
+async def dispatch_proactive_message(
+    db, member_id: str, message: str, trigger_type: str
+) -> dict | None:
+    """Dispatch a proactive message through the outbound router.
+
+    Finds the best outbound channel for the member and routes the message.
+    Guardrails (quiet hours, rate limits) should be checked by the caller
+    before invoking this function.
+
+    Args:
+        db: Database connection
+        member_id: Recipient member ID
+        message: Message body to send
+        trigger_type: The proactive trigger name (for audit trail)
+
+    Returns:
+        Route result dict, or None if routing unavailable
+    """
+    try:
+        from pib.outbound_router import route_outbound
+        channel_id = await determine_best_channel(db, member_id)
+        result = await route_outbound(
+            db,
+            channel_id=channel_id,
+            message=message,
+            member_id=member_id,
+            metadata={"trigger_type": trigger_type, "source": "proactive"},
+        )
+        log.info(f"Proactive dispatch for {member_id} via {channel_id}: {result.get('status')}")
+        return result
+    except Exception as e:
+        log.debug(f"Proactive dispatch unavailable: {e}")
+        return None
 
 
 # ─── Batch Helpers ───

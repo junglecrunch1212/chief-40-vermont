@@ -34,6 +34,14 @@ All PIB domain logic is accessed via the CLI. Never import PIB modules directly.
 | "Scoreboard" | `python -m pib.cli scoreboard-data $PIB_DB_PATH --json` |
 | "Morning brief" | `python -m pib.cli morning-digest $PIB_DB_PATH --member {member_id} --json` |
 
+### Channel Commands
+
+| User says | Route to |
+|-----------|----------|
+| "Show my channels" | `python -m pib.cli channel-list $PIB_DB_PATH --json` |
+| "Enable [channel]" | `python -m pib.cli channel-enable $PIB_DB_PATH --json '{"channel_id":"{id}"}'` |
+| "Check [channel] status" | `python -m pib.cli channel-status $PIB_DB_PATH --json '{"channel_id":"{id}"}'` |
+
 ### Write Commands (governance-gated)
 
 | User says | Route to | Gate |
@@ -77,6 +85,7 @@ Route all prefix messages through: `python -m pib.cli capture $PIB_DB_PATH --jso
 | `0 * * * *` | `python -m pib.cli backup $PIB_DB_PATH` | Hourly SQLite backup |
 | `0 3 * * *` | `python -m pib.cli cleanup $PIB_DB_PATH` | Expired data cleanup |
 | `0 2 * * 0` | `python -m pib.cli fts5-rebuild $PIB_DB_PATH` | Weekly FTS5 rebuild |
+| `*/5 * * * *` | `python -m pib.cli channel-health-check $PIB_DB_PATH` | Check all channel health |
 
 ## Permission Model
 

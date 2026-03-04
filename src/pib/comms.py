@@ -548,13 +548,13 @@ async def determine_best_channel(db, member_id: str, recipient_id: str | None = 
     """
     target = recipient_id or member_id
     try:
-        # Try member's default reply channel first
+        # Try member's default reply channel first, ordered by sort_order
         row = await db.execute_fetchone(
             """SELECT cma.channel_id FROM comms_channel_member_access cma
                JOIN comms_channels cc ON cma.channel_id = cc.id
                WHERE cma.member_id = ? AND cma.access_level IN ('write','admin')
                AND cc.enabled = 1
-               ORDER BY cc.priority ASC
+               ORDER BY cc.sort_order ASC
                LIMIT 1""",
             [target],
         )

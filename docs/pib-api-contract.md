@@ -1,7 +1,10 @@
 # PIB v5 Console → Backend API Contract
 
+> **These endpoints are served by `console/server.mjs` (Express on port 3333), not the deprecated FastAPI server.**
+
 Every endpoint the wired console calls. Backend must return these shapes exactly.
-All endpoints relative to same origin (Express serves both API and static console).
+All endpoints relative to same origin (Express serves both API and static console on port 3333).
+Response shapes are defined as JSON schemas (not Pydantic models).
 
 ---
 

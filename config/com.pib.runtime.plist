@@ -7,12 +7,9 @@
 
     <key>ProgramArguments</key>
     <array>
-        <string>/opt/pib/venv/bin/uvicorn</string>
-        <string>pib.web:app</string>
-        <string>--host</string>
-        <string>0.0.0.0</string>
-        <string>--port</string>
-        <string>3141</string>
+        <string>/usr/local/bin/openclaw</string>
+        <string>gateway</string>
+        <string>start</string>
     </array>
 
     <key>WorkingDirectory</key>
@@ -24,10 +21,8 @@
         <string>/opt/pib/data/pib.db</string>
         <key>PIB_LOG_DIR</key>
         <string>/opt/pib/logs</string>
-        <key>PIB_CORS_ORIGINS</key>
-        <string>https://pib.yourdomain.com</string>
         <key>PATH</key>
-        <string>/opt/pib/venv/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <string>/usr/local/bin:/opt/pib/venv/bin:/usr/bin:/bin</string>
     </dict>
 
     <key>RunAtLoad</key>

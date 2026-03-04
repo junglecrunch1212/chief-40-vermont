@@ -1,4 +1,9 @@
-"""LLM integration: Anthropic client, tool execution, context assembly, conversation flow."""
+"""LLM integration: Anthropic client, tool execution, context assembly, conversation flow.
+
+NOTE: In OpenClaw deployment, LLM calls are typically handled by the OpenClaw agent.
+This module is used for direct CLI invocations (e.g., pib.cli context, pib.cli chat)
+that need to compose LLM responses independently. The ANTHROPIC_API_KEY env var must be set.
+"""
 
 import json
 import logging
@@ -147,13 +152,26 @@ def select_model_tier(assemblers: list[str], channel: str) -> str:
 _client: anthropic.AsyncAnthropic | None = None
 
 
-def get_client() -> anthropic.AsyncAnthropic:
-    """Get or create the Anthropic async client."""
-    global _client
+_NO_API_KEY = False
+
+
+def get_client() -> anthropic.AsyncAnthropic | None:
+    """Get or create the Anthropic async client.
+
+    Returns None if ANTHROPIC_API_KEY is not set (fallback to deterministic responses).
+    """
+    global _client, _NO_API_KEY
+    if _NO_API_KEY:
+        return None
     if _client is None:
         api_key = os.environ.get("ANTHROPIC_API_KEY")
         if not api_key:
-            raise RuntimeError("ANTHROPIC_API_KEY not set")
+            log.warning(
+                "ANTHROPIC_API_KEY not set — LLM calls will fall back to deterministic responses. "
+                "Set the env var for full LLM functionality."
+            )
+            _NO_API_KEY = True
+            return None
         _client = anthropic.AsyncAnthropic(api_key=api_key)
     return _client
 

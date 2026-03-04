@@ -23,112 +23,113 @@ const COLORS = {
   cyanGlow: "rgba(6,182,212,0.15)",
   pink: "#ec4899",
   pinkGlow: "rgba(236,72,153,0.15)",
+  lime: "#84cc16",
+  limeGlow: "rgba(132,204,22,0.15)",
 };
 
 const LAYERS = [
   {
-    id: "sources",
-    label: "DATA SOURCES",
-    subtitle: "Gene 4: The Read Layer — read-only, never writes",
+    id: "channels",
+    label: "OPENCLAW CHANNELS",
+    subtitle: "Inbound messages → OpenClaw gateway → agent dispatch → pib.cli",
     color: COLORS.cyan,
     glow: COLORS.cyanGlow,
     items: [
-      { id: "gmail", name: "Gmail", transport: "API push + 5min poll", key: "SHA256(gmail:{messageId})", icon: "📧" },
-      { id: "gcal", name: "Google Calendar", transport: "API v3 incremental sync", key: "SHA256(gcal:{eventId}:{updated})", icon: "📅" },
-      { id: "imessage", name: "iMessage", transport: "BlueBubbles webhook", key: "SHA256(imessage:{guid})", icon: "💬" },
-      { id: "sms", name: "Twilio SMS", transport: "Webhook", key: "SHA256(sms:{MessageSid})", icon: "📱" },
-      { id: "siri", name: "Siri Shortcuts", transport: "Webhook", key: "SHA256(siri:{ts}:{text})", icon: "🎙️" },
-      { id: "reminders", name: "Apple Reminders", transport: "AppleScript 5min poll", key: "SHA256(reminder:{id})", icon: "✅" },
-      { id: "bank", name: "Bank Import", transport: "CSV file watch", key: "SHA256(bank:{acct}:{date}:{amt})", icon: "🏦" },
-      { id: "sheets", name: "Google Sheets", transport: "Apps Script onChange", key: "SHA256(sheets:{sheet}:{row})", icon: "📊" },
+      { id: "imessage", name: "iMessage (BlueBubbles)", desc: "Webhook → OpenClaw channel handler → agent routes to pib.cli", icon: "💬" },
+      { id: "sms", name: "SMS (Twilio)", desc: "Inbound webhook → OpenClaw channel → agent → pib.cli", icon: "📱" },
+      { id: "webchat", name: "Webchat", desc: "Browser → OpenClaw channel → agent → pib.cli", icon: "🌐" },
     ],
   },
   {
-    id: "ingestion",
-    label: "INGESTION PIPELINE",
-    subtitle: "Section 6: Unified adapter → 8-stage pipeline → Five Shapes",
+    id: "taskflow",
+    label: "TASK FLOW",
+    subtitle: "User message → OpenClaw channel → agent → pib.cli what-now/task-complete/capture → SQLite → response",
     color: COLORS.blue,
     glow: COLORS.blueGlow,
     items: [
-      { id: "stage1", name: "① Dedup", desc: "Idempotency key check — SHA256 per source" },
-      { id: "stage2", name: "② Member Resolution", desc: "Map sender → household member" },
-      { id: "stage3", name: "③ Parse → Five Shapes", desc: "TASK | TIME BLOCK | MONEY STATE | RECURRING | ENTITY" },
-      { id: "stage4", name: "④ Classify", desc: "Deterministic domain + urgency + energy" },
-      { id: "stage5", name: "⑤ Privacy Fence", desc: "full | privileged | redacted — Gene 6 Rule 3" },
-      { id: "stage6", name: "⑥ Route + Write", desc: "Insert into SQLite via WriteQueue (batched)" },
-      { id: "stage7", name: "⑦ Cross-Domain Observations", desc: "Detect patterns across domains" },
-      { id: "stage8", name: "⑧ Confirm + Emit", desc: "Reply to sender, emit to event bus" },
+      { id: "tf1", name: "① Channel receives message", desc: "OpenClaw gateway authenticates and routes to channel handler" },
+      { id: "tf2", name: "② Agent processes intent", desc: "OpenClaw agent determines command: what-now, task-complete, capture, etc." },
+      { id: "tf3", name: "③ pib.cli executes", desc: "python -m pib.cli <cmd> $PIB_DB_PATH — 6-layer permission boundary" },
+      { id: "tf4", name: "④ SQLite SSOT updated", desc: "WAL mode write → append-only (never deletes)" },
+      { id: "tf5", name: "⑤ JSON response", desc: "pib.cli returns structured JSON → OpenClaw → channel → user" },
     ],
   },
   {
-    id: "storage",
-    label: "SSOT — SQLite (WAL)",
-    subtitle: "Layer 1 Core — data on disk, always works, never deletes",
-    color: COLORS.green,
-    glow: COLORS.greenGlow,
-    items: [
-      { id: "ops", name: "ops_tasks", desc: "Tasks with state machine (open→in_progress→done)" },
-      { id: "cal", name: "cal_classified_events", desc: "Calendar events + conflict detection" },
-      { id: "fin", name: "fin_transactions", desc: "Transactions + budget snapshots" },
-      { id: "mem", name: "mem_long_term", desc: "FTS5-indexed persistent memory" },
-      { id: "energy", name: "pib_energy_states", desc: "Medication, sleep, focus mode, streaks" },
-      { id: "common", name: "common_members", desc: "Household members + source classifications" },
-    ],
-  },
-  {
-    id: "intelligence",
-    label: "INTELLIGENCE LAYER",
-    subtitle: "Layer 2: Context Assembly + LLM — degrades to Layer 1 if API down",
+    id: "calflow",
+    label: "CALENDAR FLOW",
+    subtitle: "Google Cal API → gog calendar events → calendar_sync.mjs → pib.cli calendar-ingest $PIB_DB_PATH → SQLite",
     color: COLORS.purple,
     glow: COLORS.purpleGlow,
     items: [
-      { id: "relevance", name: "3-Layer Relevance", desc: "Keywords → Entity match → Always-on summary" },
-      { id: "context", name: "Context Assembly", desc: "~51K token budget across 5 sections" },
-      { id: "llm", name: "Claude LLM", desc: "Opus (digest) / Sonnet (chat) / Haiku (triage)" },
-      { id: "tools", name: "15 Tools", desc: "create_task, what_now, query_*, save_memory, etc." },
-      { id: "fallback", name: "Deterministic Fallback", desc: "API down → template responses + whatNow()" },
+      { id: "cf1", name: "① OpenClaw cron triggers", desc: "Cron job fires every 15 min (replaces old APScheduler)" },
+      { id: "cf2", name: "② gog calendar events", desc: "gog CLI reads Google Calendar API v3 — incremental sync with sync tokens" },
+      { id: "cf3", name: "③ calendar_sync.mjs", desc: "Transforms raw calendar data → normalized format" },
+      { id: "cf4", name: "④ pib.cli calendar-ingest", desc: "python -m pib.cli calendar-ingest $PIB_DB_PATH — writes to cal_* tables" },
+      { id: "cf5", name: "⑤ Classification + conflicts", desc: "Events classified, custody computed, conflicts detected" },
     ],
   },
   {
-    id: "engine",
-    label: "PROACTIVE ENGINE",
-    subtitle: "Section 8: Trigger-based outbound — max 5 msgs/person/day",
+    id: "sensorflow",
+    label: "SENSOR FLOW",
+    subtitle: "Apple Shortcuts → HTTP POST from Bridge Mini → /api/sensors/ingest → SQLite → enrichment",
     color: COLORS.amber,
     glow: COLORS.amberGlow,
     items: [
-      { id: "morning", name: "Morning Digest", desc: "6:30 AM — sleep check + top 3 + custody + budget" },
-      { id: "paralysis", name: "Paralysis Detection", desc: "2h silence → gentle micro-task restart" },
-      { id: "conflict", name: "Conflict Alert", desc: "48h lookahead — critical calendar conflicts" },
-      { id: "velocity", name: "Velocity Celebration", desc: "10+ completions → celebrate + suggest break" },
-      { id: "budget", name: "Budget Alert", desc: "Category over threshold — daily cooldown" },
+      { id: "sf1", name: "① Apple Shortcuts fires", desc: "Health, FindMy, Focus, Siri, Battery data on James/Laura Mini" },
+      { id: "sf2", name: "② HTTP POST → pib-mini", desc: "Bridge Mini pushes to CoS via POST /api/sensors/ingest" },
+      { id: "sf3", name: "③ Privacy classification", desc: "Laura's data → privileged classification (never enters LLM context)" },
+      { id: "sf4", name: "④ SQLite write", desc: "Sensor data stored in pib_energy_states, common_* tables" },
+      { id: "sf5", name: "⑤ Enrichment", desc: "Energy levels, medication tracking, sleep quality → feeds whatNow() scoring" },
     ],
   },
   {
-    id: "surfaces",
-    label: "OUTPUT SURFACES",
-    subtitle: "Gene 5: whatNow() — ONE task, not a list, with micro-script",
+    id: "finflow",
+    label: "FINANCIAL FLOW",
+    subtitle: "Google Sheets → gog sheets get → pib.cli financial-sync → SQLite",
+    color: COLORS.green,
+    glow: COLORS.greenGlow,
+    items: [
+      { id: "ff1", name: "① OpenClaw cron triggers", desc: "Scheduled financial sync job" },
+      { id: "ff2", name: "② gog sheets get", desc: "gog CLI reads financial data from Google Sheets" },
+      { id: "ff3", name: "③ pib.cli financial-sync", desc: "Transforms and writes to fin_* tables in SQLite" },
+      { id: "ff4", name: "④ Budget snapshots", desc: "Category budgets, merchant rules, bill tracking updated" },
+    ],
+  },
+  {
+    id: "commsflow",
+    label: "COMMS FLOW",
+    subtitle: "Gmail → gog gmail list → pib.cli comms-ingest → SQLite → batch windows",
     color: COLORS.pink,
     glow: COLORS.pinkGlow,
     items: [
-      { id: "carousel", name: "James: Carousel", desc: "ONE card, micro-script, Done/Skip/Dismiss" },
-      { id: "compressed", name: "Laura: Compressed", desc: "Decisions [Y/N] + tasks + household status" },
-      { id: "scoreboard", name: "Scoreboard (TV)", desc: "Kitchen display — streaks, stars, Captain" },
-      { id: "imsg_out", name: "iMessage / SMS", desc: "Channel-adapted outbound messages" },
-      { id: "sheets_out", name: "Sheets Sync", desc: "DB → Sheets push every 15 min" },
+      { id: "cmf1", name: "① OpenClaw cron triggers", desc: "Scheduled comms ingest job" },
+      { id: "cmf2", name: "② gog gmail list", desc: "gog CLI reads Gmail — whitelist + triage keywords" },
+      { id: "cmf3", name: "③ pib.cli comms-ingest", desc: "Writes to ops_comms, mem_* tables" },
+      { id: "cmf4", name: "④ Batch windows", desc: "Messages batched for delivery within guardrail windows" },
+    ],
+  },
+  {
+    id: "consoleflow",
+    label: "CONSOLE FLOW",
+    subtitle: "Browser → Express :3333 → reads SQLite → JSON API → dashboard render",
+    color: COLORS.lime,
+    glow: COLORS.limeGlow,
+    items: [
+      { id: "cnf1", name: "① Browser requests", desc: "User opens console at pib-mini.local:3333" },
+      { id: "cnf2", name: "② Express server", desc: "Express :3333 handles API requests (replaces old FastAPI :3141)" },
+      { id: "cnf3", name: "③ SQLite read", desc: "Direct read from /opt/pib/data/pib.db — WAL mode allows concurrent reads" },
+      { id: "cnf4", name: "④ JSON API response", desc: "/api/today-stream, /api/tasks, /api/scoreboard-data, etc." },
+      { id: "cnf5", name: "⑤ Dashboard render", desc: "Per-actor views: James carousel, Laura compressed, scoreboard TV" },
     ],
   },
 ];
 
 const FLOWS = [
-  { from: "sources", to: "ingestion", label: "IngestEvent", style: "solid" },
-  { from: "ingestion", to: "storage", label: "Five Shapes → Write", style: "solid" },
-  { from: "storage", to: "intelligence", label: "Assembled Context", style: "solid" },
-  { from: "intelligence", to: "storage", label: "Tool Calls → Write", style: "dashed" },
-  { from: "storage", to: "engine", label: "Trigger Queries", style: "solid" },
-  { from: "engine", to: "surfaces", label: "Composed Messages", style: "solid" },
-  { from: "intelligence", to: "surfaces", label: "LLM Responses", style: "solid" },
-  { from: "surfaces", to: "ingestion", label: "User replies loop back", style: "dashed" },
-  { from: "storage", to: "surfaces", label: "whatNow() (deterministic)", style: "dotted" },
+  { from: "channels", to: "taskflow", label: "User messages → task commands", style: "solid" },
+  { from: "taskflow", to: "calflow", label: "Both write to SQLite SSOT", style: "dotted" },
+  { from: "sensorflow", to: "taskflow", label: "Energy data feeds whatNow() scoring", style: "dashed" },
+  { from: "finflow", to: "consoleflow", label: "Budget data shown in dashboard", style: "dashed" },
+  { from: "commsflow", to: "channels", label: "Outbound via OpenClaw channels", style: "dashed" },
 ];
 
 function LayerCard({ layer, isExpanded, onToggle }) {
@@ -199,14 +200,9 @@ function LayerCard({ layer, isExpanded, onToggle }) {
                   {item.name}
                 </span>
               </div>
-              {(item.desc || item.transport) && (
+              {item.desc && (
                 <div style={{ fontSize: 11.5, color: COLORS.textMuted, marginTop: 4, lineHeight: 1.5 }}>
                   {item.desc}
-                  {item.transport && (
-                    <span style={{ display: "block", color: COLORS.textDim, fontSize: 10.5, marginTop: 2 }}>
-                      Transport: {item.transport} · Key: <code style={{ color: layer.color, fontSize: 10 }}>{item.key}</code>
-                    </span>
-                  )}
                 </div>
               )}
             </div>
@@ -222,7 +218,6 @@ function FlowArrow({ flow, layers }) {
   const toLayer = layers.find((l) => l.id === flow.to);
   if (!fromLayer || !toLayer) return null;
 
-  const isReverse = flow.style === "dashed" && flow.from === "surfaces";
   const color = fromLayer.color;
 
   return (
@@ -267,45 +262,14 @@ function FlowArrow({ flow, layers }) {
         fontSize: 14,
         flexShrink: 0,
       }}>
-        {isReverse ? "↺" : "→"}
+        →
       </span>
     </div>
   );
 }
 
-function GeneBar({ genes }) {
-  return (
-    <div style={{
-      display: "flex",
-      flexWrap: "wrap",
-      gap: 6,
-      marginBottom: 20,
-    }}>
-      {genes.map((g) => (
-        <span
-          key={g.id}
-          style={{
-            fontSize: 10,
-            fontWeight: 600,
-            padding: "3px 8px",
-            borderRadius: 4,
-            background: g.active ? `${g.color}22` : "transparent",
-            border: `1px solid ${g.active ? g.color : COLORS.border}`,
-            color: g.active ? g.color : COLORS.textDim,
-            fontFamily: "'JetBrains Mono', 'SF Mono', monospace",
-            letterSpacing: "0.05em",
-            transition: "all 0.3s",
-          }}
-        >
-          {g.label}
-        </span>
-      ))}
-    </div>
-  );
-}
-
 export default function PIBDataFlows() {
-  const [expanded, setExpanded] = useState(new Set(["sources", "ingestion"]));
+  const [expanded, setExpanded] = useState(new Set(["channels", "taskflow"]));
 
   const toggle = (id) => {
     setExpanded((prev) => {
@@ -317,18 +281,6 @@ export default function PIBDataFlows() {
 
   const expandAll = () => setExpanded(new Set(LAYERS.map((l) => l.id)));
   const collapseAll = () => setExpanded(new Set());
-
-  const genes = [
-    { id: 1, label: "Gene 1: The Loop", color: COLORS.blue, active: expanded.has("ingestion") },
-    { id: 2, label: "Gene 2: Vocabulary", color: COLORS.cyan, active: expanded.has("sources") },
-    { id: 3, label: "Gene 3: Five Shapes", color: COLORS.blue, active: expanded.has("ingestion") },
-    { id: 4, label: "Gene 4: Read Layer", color: COLORS.cyan, active: expanded.has("sources") },
-    { id: 5, label: "Gene 5: whatNow()", color: COLORS.pink, active: expanded.has("surfaces") },
-    { id: 6, label: "Gene 6: Write Layer", color: COLORS.green, active: expanded.has("storage") },
-    { id: 7, label: "Gene 7: Invariants", color: COLORS.green, active: expanded.has("storage") },
-    { id: 8, label: "Gene 8: Growth Rule", color: COLORS.purple, active: expanded.has("intelligence") },
-    { id: 9, label: "Gene 9: The Probe", color: COLORS.amber, active: expanded.has("engine") },
-  ];
 
   return (
     <div style={{
@@ -352,7 +304,7 @@ export default function PIBDataFlows() {
             💩 PIB v5 — Data Flow Architecture
           </h1>
           <p style={{ fontSize: 12, color: COLORS.textDim, margin: "6px 0 0", lineHeight: 1.5 }}>
-            Mac Mini COS-1 · FastAPI :3141 · SQLite WAL · Cloudflare Tunnel
+            OpenClaw L0 · Hub+Spoke topology · pib-mini.local · gog CLI + pib.cli pipeline
           </p>
           <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
             <button
@@ -378,17 +330,15 @@ export default function PIBDataFlows() {
           </div>
         </div>
 
-        {/* Gene indicators */}
-        <GeneBar genes={genes} />
-
-        {/* The Three Layers legend */}
+        {/* The Layers legend */}
         <div style={{
           display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap",
         }}>
           {[
+            { label: "L0: OpenClaw (infra)", color: COLORS.cyan },
             { label: "L1: Core (always works)", color: COLORS.green },
             { label: "L2: Enhanced (LLM)", color: COLORS.purple },
-            { label: "L3: Extended (APIs)", color: COLORS.cyan },
+            { label: "L3: Extended (APIs)", color: COLORS.amber },
           ].map((l) => (
             <span key={l.label} style={{
               fontSize: 10, color: l.color,
@@ -425,19 +375,6 @@ export default function PIBDataFlows() {
                     .map((f, j) => (
                       <FlowArrow key={j} flow={f} layers={LAYERS} />
                     ))}
-                  {/* Show cross-layer flows at relevant positions */}
-                  {i === 2 &&
-                    FLOWS.filter((f) =>
-                      (f.from === "storage" && f.to === "engine") ||
-                      (f.from === "storage" && f.to === "surfaces")
-                    ).map((f, j) => (
-                      <FlowArrow key={`cross-${j}`} flow={f} layers={LAYERS} />
-                    ))}
-                  {i === 4 &&
-                    FLOWS.filter((f) => f.from === "surfaces" && f.to === "ingestion")
-                      .map((f, j) => (
-                        <FlowArrow key={`loop-${j}`} flow={f} layers={LAYERS} />
-                      ))}
                 </div>
               )}
             </div>
@@ -474,8 +411,7 @@ export default function PIBDataFlows() {
               "The system never moves money",
               "Privileged data never enters the context window",
               "whatNow() is deterministic — no LLM in the function",
-              "Every task has a micro_script",
-              "Classification at onboarding, execution never reclassifies",
+              "All access through pib.cli permission boundary (6 layers)",
               "The LLM recommends. The write layer executes.",
             ].map((inv, i) => (
               <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
@@ -511,11 +447,11 @@ export default function PIBDataFlows() {
             fontFamily: "monospace",
           }}>
             {[
-              "Anthropic API down → template fallbacks, whatNow() still works",
-              "Google Calendar down → use last-known + warn",
-              "Gmail down → other capture still works",
-              "Bank/Plaid down → skip budget context",
-              "BlueBubbles down → fall back to Twilio SMS",
+              "L3 → L2: Google APIs down → use last-known data + warn",
+              "L3 → L2: Sensors offline → skip energy context, use defaults",
+              "L2 → L1: Anthropic API down → template fallbacks, whatNow() still works",
+              "L2 → L1: Model routing fails → OpenClaw tries alternate provider",
+              "BlueBubbles down → fall back to Twilio SMS channel",
             ].map((d, i) => (
               <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
                 <span style={{ color: COLORS.amber, flexShrink: 0 }}>⚡</span>
@@ -532,7 +468,7 @@ export default function PIBDataFlows() {
           textAlign: "center",
           fontFamily: "monospace",
         }}>
-          pib-v5-build-spec.md · Click layers to expand · Genes highlight when their layer is active
+          OpenClaw L0 · Hub+Spoke · Click flows to expand · All data through pib.cli permission boundary
         </div>
       </div>
     </div>

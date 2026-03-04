@@ -12,161 +12,179 @@ const C = {
   textDim: "#546280",
   // Zones
   hardware: { fill: "#1a1205", border: "#78591a", text: "#f0c040", glow: "rgba(240,192,64,0.07)" },
-  external: { fill: "#0a1520", border: "#1a5078", text: "#40a0e0", glow: "rgba(64,160,224,0.07)" },
-  auth: { fill: "#1a0a18", border: "#7a2070", text: "#d060c0", glow: "rgba(208,96,192,0.07)" },
-  fastapi: { fill: "#0a150a", border: "#2a7830", text: "#50d060", glow: "rgba(80,208,96,0.07)" },
-  adapters: { fill: "#0d1520", border: "#2060a0", text: "#60b0f0", glow: "rgba(96,176,240,0.07)" },
-  pipeline: { fill: "#100a1a", border: "#5030a0", text: "#9070e0", glow: "rgba(144,112,224,0.07)" },
+  bridge: { fill: "#15100a", border: "#6a4a1a", text: "#d0a030", glow: "rgba(208,160,48,0.07)" },
+  openclaw: { fill: "#0a150a", border: "#2a7830", text: "#50d060", glow: "rgba(80,208,96,0.07)" },
+  channels: { fill: "#0a1520", border: "#2060a0", text: "#60b0f0", glow: "rgba(96,176,240,0.07)" },
+  pibL1: { fill: "#100a1a", border: "#5030a0", text: "#9070e0", glow: "rgba(144,112,224,0.07)" },
+  pibL2: { fill: "#150a18", border: "#802060", text: "#e060a0", glow: "rgba(224,96,160,0.07)" },
   storage: { fill: "#0a1510", border: "#207050", text: "#40c080", glow: "rgba(64,192,128,0.07)" },
-  intel: { fill: "#150a18", border: "#802060", text: "#e060a0", glow: "rgba(224,96,160,0.07)" },
-  scheduler: { fill: "#151005", border: "#806020", text: "#e0a030", glow: "rgba(224,160,48,0.07)" },
-  surfaces: { fill: "#051015", border: "#206080", text: "#40c0e0", glow: "rgba(64,192,224,0.07)" },
+  console: { fill: "#051015", border: "#206080", text: "#40c0e0", glow: "rgba(64,192,224,0.07)" },
+  external: { fill: "#0a1520", border: "#1a5078", text: "#40a0e0", glow: "rgba(64,160,224,0.07)" },
 };
 
 const ZONES = [
   {
     id: "hardware",
-    title: 'MAC MINI "COS-1"',
-    subtitle: "M2+ · headless · closet · always-on · macOS Sequoia 15+",
+    title: 'COS MAC MINI "PIB-MINI" — BRAIN',
+    subtitle: "M2+ · headless · closet · always-on · macOS Sequoia 15+ · Hub in Hub+Spoke topology",
     theme: C.hardware,
     components: [
-      { name: "/opt/pib/data/pib.db", detail: "SQLite 3.45+ WAL mode" },
-      { name: "/opt/pib/venv", detail: "Python 3.12+ virtual environment" },
-      { name: "/opt/pib/logs/pib.jsonl", detail: "Rotating JSON logs (50MB × 5)" },
-      { name: "BlueBubbles v1.9+", detail: "iMessage bridge — local macOS process" },
+      { name: "OpenClaw daemon", detail: "L0 infrastructure — Node.js gateway, always-on via launchd" },
+      { name: "PIB Python package", detail: "L1-L2 logic — whatNow, rewards, custody, memory, ingest" },
+      { name: "/opt/pib/data/pib.db", detail: "SQLite 3.45+ WAL mode — single source of truth" },
+      { name: "Console server", detail: "Express :3333 — dashboard, scoreboard, API" },
+      { name: "gog CLI", detail: "Google Calendar, Sheets, Gmail access" },
+      { name: "BlueBubbles v1.9+", detail: "iMessage bridge (temporary — moves to James Mini later)" },
       { name: "launchd", detail: "Auto-start on boot, restart on crash" },
       { name: "Time Machine", detail: "Backup + hourly SQLite copy" },
     ],
   },
   {
-    id: "external",
-    title: "EXTERNAL SERVICES",
-    subtitle: "Read-only data sources + outbound delivery — Gene 4: never writes to calendars or moves money",
-    theme: C.external,
-    components: [
-      { name: "Google Calendar", detail: "API v3 incremental sync · sync tokens · full sync daily 2AM" },
-      { name: "Gmail", detail: "API push notifications + 5min poll fallback" },
-      { name: "Google Sheets", detail: "Bidirectional sync · Apps Script onChange trigger" },
-      { name: "Twilio", detail: "Inbound webhooks + outbound SMS delivery" },
-      { name: "Anthropic API", detail: "Claude Opus / Sonnet / Haiku — LLM composition" },
-      { name: "Cloudflare", detail: "Tunnel (ingress) + Access (Google OAuth)" },
-      { name: "Healthchecks.io", detail: "External uptime monitoring — heartbeat every 5min" },
-    ],
-  },
-  {
-    id: "auth",
-    title: "AUTHENTICATION LAYER",
-    subtitle: "From day one — every endpoint authenticated, every webhook validated",
-    theme: C.auth,
-    components: [
-      { name: "Cloudflare Access", detail: "Google OAuth — James + Laura only → web + API" },
-      { name: "Twilio Signature", detail: "X-Twilio-Signature HMAC validation on webhooks" },
-      { name: "BlueBubbles Secret", detail: "Shared secret header on iMessage webhooks" },
-      { name: "Siri Bearer Token", detail: "Authorization: Bearer <token> on shortcut POSTs" },
-      { name: "Sheets Service Acct", detail: "Google service account key for webhook auth" },
-      { name: "Rate Limiter", detail: "Per-source: SMS 30/min, Siri 20/min, web 10/min" },
-    ],
-  },
-  {
-    id: "fastapi",
-    title: "FASTAPI APPLICATION — PORT 3141",
-    subtitle: "Core application server — async Python · aiosqlite · httpx · anthropic SDK",
-    theme: C.fastapi,
+    id: "bridges",
+    title: "BRIDGE MINIS — SPOKE NODES",
+    subtitle: "Sensor data + iMessage bridges — push to CoS via HTTP webhooks",
+    theme: C.bridge,
     children: [
       {
-        id: "adapters",
-        title: "ADAPTERS",
-        subtitle: "8 sources → unified IngestEvent interface (poll + webhook + send)",
-        theme: C.adapters,
+        id: "james-mini",
+        title: 'JAMES MAC MINI "JAMES-MINI"',
+        subtitle: "Bridge — James's personal sensors + iMessage",
+        theme: C.bridge,
         components: [
-          { name: "Gmail Adapter", detail: "API push + 5min poll · whitelist + triage keywords" },
-          { name: "Google Calendar", detail: "Incremental sync · 15min + 5min volatile" },
-          { name: "Apple Reminders", detail: "AppleScript bridge · 5min poll" },
-          { name: "iMessage (BB)", detail: "BlueBubbles webhook + 5min backup poll" },
-          { name: "Twilio SMS", detail: "Webhook handler + send via API" },
-          { name: "Siri Shortcuts", detail: "POST webhook → IngestEvent" },
-          { name: "Bank Import", detail: "CSV file watch · 5min poll · Plaid deferred" },
-          { name: "Sheets Webhook", detail: "onChange → diff → queue → flush" },
+          { name: "BlueBubbles", detail: "James's iMessage bridge" },
+          { name: "Apple Shortcuts", detail: "Health, FindMy, Focus, Siri, Battery" },
+          { name: "HomeKit bridge", detail: "Homebridge — smart home integration" },
+          { name: "HTTP webhooks → CoS", detail: "POST /api/sensors/ingest → pib-mini" },
         ],
       },
       {
-        id: "pipeline",
-        title: "INGESTION PIPELINE",
-        subtitle: "8 stages · dedup → parse → classify → privacy → write → observe → confirm",
-        theme: C.pipeline,
+        id: "laura-mini",
+        title: 'LAURA MAC MINI "LAURA-MINI"',
+        subtitle: "Bridge — Laura's personal sensors + iMessage (privacy: privileged)",
+        theme: C.bridge,
         components: [
-          { name: "Dedup Engine", detail: "SHA256 idempotency keys per source type" },
-          { name: "Member Resolver", detail: "Phone/email/handle → member_id mapping" },
-          { name: "Five Shapes Parser", detail: "TASK | TIME_BLOCK | MONEY_STATE | RECURRING | ENTITY" },
-          { name: "Classifier", detail: "Deterministic domain + urgency + energy level" },
-          { name: "Privacy Fence", detail: "full | privileged | redacted — content filtered at read" },
-          { name: "Prefix Parser", detail: "20+ regex rules: grocery:, call, buy, meds, sleep..." },
-          { name: "Micro-Script Gen", detail: "Deterministic first-physical-action instructions" },
-          { name: "Dead Letter Queue", detail: "Failed events stored, retried ×3, alertable" },
+          { name: "BlueBubbles", detail: "Laura's iMessage bridge" },
+          { name: "Apple Shortcuts", detail: "Health, FindMy, Focus, Siri, Battery" },
+          { name: "HTTP webhooks → CoS", detail: "POST /api/sensors/ingest (privileged classification)" },
+        ],
+      },
+    ],
+  },
+  {
+    id: "openclaw",
+    title: "OPENCLAW L0 — GATEWAY + INFRASTRUCTURE",
+    subtitle: "Node.js daemon — channel routing, cron engine, model routing, agent orchestration",
+    theme: C.openclaw,
+    children: [
+      {
+        id: "channels",
+        title: "CHANNEL ROUTING",
+        subtitle: "Inbound messages → unified channel interface → agent dispatch",
+        theme: C.channels,
+        components: [
+          { name: "iMessage (BlueBubbles)", detail: "Webhook from BlueBubbles → channel handler" },
+          { name: "SMS (Twilio)", detail: "Inbound webhook + outbound SMS delivery" },
+          { name: "Webchat", detail: "Browser-based chat interface" },
+          { name: "Channel auth", detail: "Per-channel authentication (replaces old auth.py)" },
         ],
       },
       {
-        id: "storage",
-        title: "SQLITE SSOT",
-        subtitle: "Layer 1 Core — WAL mode · write-batched · append-only · never deletes",
-        theme: C.storage,
+        id: "oc-cron",
+        title: "CRON ENGINE",
+        subtitle: "Replaces APScheduler — declarative cron jobs calling pib.cli",
+        theme: C.openclaw,
         components: [
-          { name: "common_*", detail: "Members, sources, custody, locations, phases, config, audit, undo" },
-          { name: "ops_*", detail: "Tasks (state machine), goals, items, recurring, comms, lists, streaks" },
-          { name: "cal_*", detail: "Sources, raw events, classified events, daily states, conflicts" },
-          { name: "fin_*", detail: "Transactions, budgets, merchant rules, capital expenses, bills" },
-          { name: "mem_*", detail: "Sessions, messages, long-term memory (FTS5), digests, approvals" },
-          { name: "pib_*", detail: "Reward log, energy states, coach protocols" },
-          { name: "meta_*", detail: "Schema version, migrations (up+down), discovery reports" },
-          { name: "WriteQueue", detail: "Batched flush every 100ms/50 items · persistent connection" },
+          { name: "Calendar sync", detail: "gog calendar events → calendar_sync.mjs → pib.cli calendar-ingest" },
+          { name: "Morning digest", detail: "6:30 AM — pib.cli morning-digest" },
+          { name: "Recurring spawn", detail: "6:00 AM — pib.cli spawn-recurring" },
+          { name: "Financial sync", detail: "gog sheets get → pib.cli financial-sync" },
+          { name: "Comms ingest", detail: "gog gmail list → pib.cli comms-ingest" },
+          { name: "Proactive scan", detail: "*/30 7-22 — pib.cli proactive-scan" },
+          { name: "Sensor enrichment", detail: "Process queued sensor data from Bridge Minis" },
         ],
       },
       {
-        id: "intel",
-        title: "INTELLIGENCE LAYER",
-        subtitle: "Layer 2 Enhanced — degrades to Layer 1 template fallbacks when API unavailable",
-        theme: C.intel,
+        id: "oc-model",
+        title: "MODEL ROUTING",
+        subtitle: "Multi-provider LLM access — replaces direct Anthropic client",
+        theme: C.openclaw,
         components: [
-          { name: "Relevance Detection", detail: "3-layer: keywords → entity match → always-on summary" },
-          { name: "Context Assembly", detail: "~51K tokens: system(2.5K) + summary(500) + context(25K) + memory(3K) + history(20K)" },
-          { name: "Model Router", detail: "Opus (digest/complex) · Sonnet (chat) · Haiku (triage/classify)" },
-          { name: "15 Tool Functions", detail: "create_task, what_now, query_*, save_memory, send_message, undo..." },
-          { name: "Conversation Manager", detail: "Sliding window · SMS: 10 msgs · Web: 50 msgs" },
-          { name: "Hallucination Guard", detail: "Validate LLM output against structured source data" },
-          { name: "Deterministic Fallback", detail: "API down → template responses + whatNow() still works" },
+          { name: "Provider routing", detail: "Anthropic, OpenAI, local — failover + cost control" },
+          { name: "Claude Opus", detail: "Complex reasoning, digests, coaching" },
+          { name: "Claude Sonnet", detail: "Standard chat, task processing" },
+          { name: "Claude Haiku", detail: "Triage, classification, quick responses" },
         ],
       },
       {
-        id: "scheduler",
-        title: "SCHEDULER + PROACTIVE ENGINE",
-        subtitle: "APScheduler AsyncIOScheduler — NEVER BlockingScheduler (freezes event loop)",
-        theme: C.scheduler,
+        id: "oc-gog",
+        title: "GOG CLI — GOOGLE SERVICES",
+        subtitle: "CLI tool for Google Calendar, Sheets, Gmail access",
+        theme: C.openclaw,
         components: [
-          { name: "Calendar Sync", detail: "*/15 min cron — incremental + 5min volatile window" },
-          { name: "Morning Digest", detail: "6:30 AM — sleep check + top 3 + custody + budget" },
-          { name: "Paralysis Detection", detail: "2h silence during peak → micro-task restart (James)" },
-          { name: "Post-Meeting Capture", detail: "Event ended <15min ago → prompt for action items" },
-          { name: "Conflict Alert", detail: "48h lookahead — critical/high calendar conflicts" },
-          { name: "Budget Alert", detail: "Category over threshold — daily cooldown" },
-          { name: "Sheets Push", detail: "*/15 min — DB → Google Sheets sync" },
-          { name: "Guardrails", detail: "5 msgs/day max · 2/hour · quiet 10pm-7am · focus mode" },
+          { name: "gog calendar events", detail: "Read calendar data → feed to calendar_sync.mjs" },
+          { name: "gog sheets get", detail: "Read Google Sheets → feed to pib.cli financial-sync" },
+          { name: "gog gmail list", detail: "Read Gmail → feed to pib.cli comms-ingest" },
         ],
       },
-      {
-        id: "surfaces",
-        title: "OUTPUT SURFACES",
-        subtitle: "Gene 5: whatNow() — ONE task with micro-script · per-actor view modes",
-        theme: C.surfaces,
-        components: [
-          { name: "Web Dashboard", detail: "/dashboard — today view + tasks + schedule + budget" },
-          { name: "James: Carousel", detail: "ONE card · micro-script · Done/Skip/Dismiss · streak display" },
-          { name: "Laura: Compressed", detail: "Decisions [Y/N] + task list + household status" },
-          { name: "Scoreboard /scoreboard", detail: "Kitchen TV · dark bg · large text · auto-refresh 60s" },
-          { name: "Web Chat + SSE", detail: "Streaming responses · tool use · up to 5 tool rounds" },
-          { name: "iMessage / SMS Out", detail: "Channel-adapted delivery · confirmation messages" },
-          { name: "Health Probe /health", detail: "Read-only · DB check · adapter pings · for Healthchecks.io" },
-        ],
-      },
+    ],
+  },
+  {
+    id: "pibL1",
+    title: "PIB L1 — DETERMINISTIC CORE",
+    subtitle: "python -m pib.cli — permission boundary with 6-layer security (allowlist, governance, SQL guard, rate limit, sanitizer, audit)",
+    theme: C.pibL1,
+    components: [
+      { name: "cli.py", detail: "Permission boundary — all access through pib.cli commands" },
+      { name: "engine.py / whatNow()", detail: "THE deterministic function — scoring, no LLM, no side effects" },
+      { name: "rewards.py", detail: "Variable-ratio reinforcement — 70/20/8/2 reward tiers" },
+      { name: "custody.py", detail: "DST-aware custody date math — who_has_child()" },
+      { name: "memory.py", detail: "Long-term memory — FTS5 search, dedup, negation detection" },
+      { name: "ingest.py", detail: "Unified ingestion — dedup, parse, classify, privacy fence, write" },
+      { name: "corrections.py", detail: "Misclassification feedback — fix: and reclassify: commands" },
+    ],
+  },
+  {
+    id: "pibL2",
+    title: "PIB L2 — INTELLIGENCE LAYER",
+    subtitle: "LLM-enhanced — degrades to L1 template fallbacks when API unavailable",
+    theme: C.pibL2,
+    components: [
+      { name: "Claude LLM", detail: "Opus (digest/complex) · Sonnet (chat) · Haiku (triage)" },
+      { name: "Context assembly", detail: "~51K tokens: system + summary + context + memory + history" },
+      { name: "Coaching protocols", detail: "8 protocols — paralysis detection, velocity celebration, etc." },
+      { name: "Proactive engine", detail: "Trigger-based outbound — morning digest, conflict alerts" },
+      { name: "Hallucination guard", detail: "Validate LLM output against structured source data" },
+      { name: "Deterministic fallback", detail: "API down → template responses + whatNow() still works" },
+    ],
+  },
+  {
+    id: "storage",
+    title: "SQLITE SSOT — /opt/pib/data/pib.db",
+    subtitle: "WAL mode · FTS5 · append-only · never deletes — Layer 1 always works",
+    theme: C.storage,
+    components: [
+      { name: "common_*", detail: "Members, sources, custody, locations, phases, config, audit" },
+      { name: "ops_*", detail: "Tasks (state machine), goals, items, recurring, comms, lists, streaks" },
+      { name: "cal_*", detail: "Sources, raw events, classified events, daily states, conflicts" },
+      { name: "fin_*", detail: "Transactions, budgets, merchant rules, capital expenses, bills" },
+      { name: "mem_*", detail: "Sessions, messages, long-term memory (FTS5), digests, approvals" },
+      { name: "pib_*", detail: "Reward log, energy states, coach protocols" },
+      { name: "meta_*", detail: "Schema version, migrations (up+down), discovery reports" },
+      { name: "Backup", detail: "Hourly .backup + daily encrypted cloud backup (age)" },
+    ],
+  },
+  {
+    id: "console",
+    title: "CONSOLE — EXPRESS :3333",
+    subtitle: "Dashboard UI + API — reads SQLite SSOT directly",
+    theme: C.console,
+    components: [
+      { name: "Dashboard", detail: "Today view + tasks + schedule + budget — per-actor views" },
+      { name: "James: Carousel", detail: "ONE card · micro-script · Done/Skip/Dismiss · streak display" },
+      { name: "Laura: Compressed", detail: "Decisions [Y/N] + task list + household status" },
+      { name: "Scoreboard", detail: "Kitchen TV · dark bg · large text · auto-refresh 60s" },
+      { name: "Web Chat", detail: "Streaming responses via SSE" },
+      { name: "Health Probe", detail: "Read-only · DB check · adapter pings" },
     ],
   },
 ];
@@ -229,10 +247,9 @@ function ZoneBlock({ zone, depth = 0, expandedSet, toggle }) {
   const isOpen = expandedSet.has(zone.id);
   const theme = zone.theme;
   const hasChildren = zone.children && zone.children.length > 0;
-  const indent = depth * 0;
 
   return (
-    <div style={{ marginLeft: indent }}>
+    <div>
       <div
         onClick={() => toggle(zone.id)}
         style={{
@@ -243,7 +260,6 @@ function ZoneBlock({ zone, depth = 0, expandedSet, toggle }) {
           cursor: "pointer",
           transition: "all 0.25s ease",
           boxShadow: isOpen ? `0 0 20px ${theme.glow}, inset 0 0 30px ${theme.glow}` : "none",
-          marginBottom: isOpen && hasChildren ? 0 : 0,
           borderBottomLeftRadius: isOpen && hasChildren ? 0 : undefined,
           borderBottomRightRadius: isOpen && hasChildren ? 0 : undefined,
         }}
@@ -335,11 +351,22 @@ function ZoneBlock({ zone, depth = 0, expandedSet, toggle }) {
   );
 }
 
+const CONNECTIONS = [
+  { from: "bridges", to: "openclaw", label: "sensor webhooks (HTTP POST)", direction: "fwd" },
+  { from: "channels", to: "pibL1", label: "pib.cli commands via agent", direction: "fwd" },
+  { from: "openclaw", to: "pibL1", label: "cron → python -m pib.cli", direction: "fwd" },
+  { from: "pibL1", to: "storage", label: "read/write SQLite SSOT", direction: "both" },
+  { from: "pibL2", to: "pibL1", label: "LLM enhances L1 decisions", direction: "fwd" },
+  { from: "storage", to: "console", label: "Express reads SQLite directly", direction: "fwd" },
+  { from: "storage", to: "pibL2", label: "assembled context (~51K tokens)", direction: "fwd" },
+  { from: "openclaw", to: "pibL2", label: "model routing → Claude", direction: "fwd", style: "dashed" },
+  { from: "console", to: "channels", label: "webchat channel", direction: "both", style: "dashed" },
+];
+
 function ConnectionLine({ from, to, label, direction, style: lineStyle }) {
-  const fromZone = ZONES.find(z => z.id === from) ||
-    ZONES.flatMap(z => z.children || []).find(z => z.id === from);
-  const toZone = ZONES.find(z => z.id === to) ||
-    ZONES.flatMap(z => z.children || []).find(z => z.id === to);
+  const allZones = [...ZONES, ...ZONES.flatMap(z => z.children || [])];
+  const fromZone = allZones.find(z => z.id === from);
+  const toZone = allZones.find(z => z.id === to);
   if (!fromZone || !toZone) return null;
 
   const fromColor = fromZone.theme.text;
@@ -371,8 +398,6 @@ function ConnectionLine({ from, to, label, direction, style: lineStyle }) {
         flex: 1, height: 1,
         background: lineStyle === "dashed"
           ? `repeating-linear-gradient(90deg, ${C.textDim} 0 5px, transparent 5px 9px)`
-          : lineStyle === "dotted"
-          ? `repeating-linear-gradient(90deg, ${C.textDim} 0 2px, transparent 2px 6px)`
           : `linear-gradient(90deg, ${fromColor}60, ${toColor}60)`,
       }} />
       <span style={{ color: C.textMid, whiteSpace: "nowrap", fontSize: 9 }}>
@@ -382,8 +407,6 @@ function ConnectionLine({ from, to, label, direction, style: lineStyle }) {
         flex: 1, height: 1,
         background: lineStyle === "dashed"
           ? `repeating-linear-gradient(90deg, ${C.textDim} 0 5px, transparent 5px 9px)`
-          : lineStyle === "dotted"
-          ? `repeating-linear-gradient(90deg, ${C.textDim} 0 2px, transparent 2px 6px)`
           : `linear-gradient(90deg, ${fromColor}60, ${toColor}60)`,
       }} />
       <span style={{ color: toColor, fontSize: 12 }}>
@@ -404,27 +427,12 @@ function ConnectionLine({ from, to, label, direction, style: lineStyle }) {
   );
 }
 
-const CONNECTIONS = [
-  { from: "external", to: "auth", label: "inbound requests", direction: "fwd" },
-  { from: "auth", to: "adapters", label: "validated events", direction: "fwd" },
-  { from: "adapters", to: "pipeline", label: "IngestEvent", direction: "fwd" },
-  { from: "pipeline", to: "storage", label: "Five Shapes → WriteQueue", direction: "fwd" },
-  { from: "storage", to: "intel", label: "assembled context (~51K tokens)", direction: "fwd" },
-  { from: "intel", to: "storage", label: "tool calls → write", direction: "back", style: "dashed" },
-  { from: "storage", to: "scheduler", label: "trigger queries", direction: "fwd" },
-  { from: "scheduler", to: "intel", label: "compose request", direction: "fwd" },
-  { from: "intel", to: "surfaces", label: "LLM responses", direction: "fwd" },
-  { from: "scheduler", to: "surfaces", label: "proactive messages", direction: "fwd" },
-  { from: "storage", to: "surfaces", label: "whatNow() deterministic", direction: "fwd", style: "dotted" },
-  { from: "surfaces", to: "pipeline", label: "user replies loop back", direction: "back", style: "dashed" },
-  { from: "storage", to: "external", label: "Sheets push / SMS out", direction: "fwd", style: "dashed" },
-];
-
 function LayerLegend() {
   const layers = [
-    { label: "LAYER 1: CORE", desc: "Always works — no LLM required", color: C.storage.text },
-    { label: "LAYER 2: ENHANCED", desc: "Claude LLM — degrades gracefully", color: C.intel.text },
-    { label: "LAYER 3: EXTENDED", desc: "External APIs — degrades to L2/L1", color: C.external.text },
+    { label: "L0: OPENCLAW", desc: "Infrastructure — gateway, cron, channels, model routing", color: C.openclaw.text },
+    { label: "L1: PIB CORE", desc: "Always works — no LLM required", color: C.pibL1.text },
+    { label: "L2: PIB ENHANCED", desc: "Claude LLM — degrades gracefully to L1", color: C.pibL2.text },
+    { label: "L3: EXTERNAL", desc: "Google APIs, sensors — degrades to L2/L1", color: C.external.text },
   ];
   return (
     <div style={{
@@ -461,7 +469,7 @@ export default function PIBSystemArchitecture() {
     ...ZONES.flatMap(z => (z.children || []).map(c => c.id)),
   ];
 
-  const [expanded, setExpanded] = useState(new Set(["fastapi"]));
+  const [expanded, setExpanded] = useState(new Set(["openclaw"]));
   const [showConnections, setShowConnections] = useState(true);
 
   const toggle = (id) => {
@@ -502,7 +510,7 @@ export default function PIBSystemArchitecture() {
               color: C.textDim,
               fontFamily: "monospace",
             }}>
-              pib-v5-build-spec.md
+              OpenClaw L0 · Hub+Spoke
             </span>
           </div>
           <p style={{
@@ -511,8 +519,8 @@ export default function PIBSystemArchitecture() {
             margin: "6px 0 0",
             lineHeight: 1.5,
           }}>
-            A prosthetic prefrontal cortex running on a Mac Mini in the closet.
-            FastAPI :3141 · SQLite WAL · Cloudflare Tunnel · 8 adapters · 15 tools · 3 Claude models.
+            A prosthetic prefrontal cortex running on Mac Minis in the closet.
+            OpenClaw gateway · SQLite WAL · LAN-only (pib-mini.local) · 3 Minis · pib.cli permission boundary · 3 Claude models.
           </p>
 
           <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
@@ -531,36 +539,19 @@ export default function PIBSystemArchitecture() {
 
         {/* Architecture blocks */}
         <div style={{ display: "grid", gap: 8 }}>
-          {ZONES.map((zone, zi) => (
-            <div key={zone.id}>
-              <ZoneBlock
-                zone={zone}
-                depth={0}
-                expandedSet={expanded}
-                toggle={toggle}
-              />
-
-              {/* Connection lines between zones */}
-              {showConnections && zi < ZONES.length - 1 && (
-                <div style={{ padding: "4px 0", marginBottom: 2 }}>
-                  {CONNECTIONS
-                    .filter(c => {
-                      const fromIdx = ZONES.findIndex(z => z.id === c.from);
-                      const toIdx = ZONES.findIndex(z => z.id === c.to);
-                      return (fromIdx === zi && toIdx === zi + 1) ||
-                        (toIdx === zi && fromIdx === zi + 1);
-                    })
-                    .map((c, i) => (
-                      <ConnectionLine key={i} {...c} />
-                    ))}
-                </div>
-              )}
-            </div>
+          {ZONES.map((zone) => (
+            <ZoneBlock
+              key={zone.id}
+              zone={zone}
+              depth={0}
+              expandedSet={expanded}
+              toggle={toggle}
+            />
           ))}
         </div>
 
-        {/* Internal Connections (within FastAPI) */}
-        {showConnections && expanded.has("fastapi") && (
+        {/* All Connections */}
+        {showConnections && (
           <div style={{
             marginTop: 16,
             padding: "14px 16px",
@@ -576,22 +567,17 @@ export default function PIBSystemArchitecture() {
               marginBottom: 8,
               fontFamily: "monospace",
             }}>
-              INTERNAL DATA FLOW (within FastAPI)
+              DATA FLOW CONNECTIONS
             </div>
             <div style={{ display: "grid", gap: 2 }}>
-              {CONNECTIONS
-                .filter(c =>
-                  ["adapters", "pipeline", "storage", "intel", "scheduler", "surfaces"].includes(c.from) &&
-                  ["adapters", "pipeline", "storage", "intel", "scheduler", "surfaces"].includes(c.to)
-                )
-                .map((c, i) => (
-                  <ConnectionLine key={i} {...c} />
-                ))}
+              {CONNECTIONS.map((c, i) => (
+                <ConnectionLine key={i} {...c} />
+              ))}
             </div>
           </div>
         )}
 
-        {/* Build Phases */}
+        {/* Degradation Layers */}
         <div style={{
           marginTop: 16,
           padding: "14px 16px",
@@ -607,27 +593,21 @@ export default function PIBSystemArchitecture() {
             marginBottom: 10,
             fontFamily: "monospace",
           }}>
-            BUILD PHASES
+            THREE-LAYER DEGRADATION
           </div>
           <div style={{ display: "grid", gap: 6 }}>
             {[
-              { phase: "Phase 0", hours: "~16h", title: "Operational", desc: "Schema + pipeline + SMS + Siri + whatNow() + web chat + streaks", color: C.fastapi.text },
-              { phase: "Phase 1", hours: "~16h", title: "Calendar Intelligence", desc: "Google Calendar sync + classification + custody + morning digest", color: C.adapters.text },
-              { phase: "Phase 2", hours: "~16h", title: "Console + Scoreboard", desc: "Dashboard views + iMessage + Reminders + ADHD mechanics", color: C.surfaces.text },
-              { phase: "Phase 3", hours: "Weeks 2-4", title: "Finance + Memory + Polish", desc: "Bank import + budgets + Sheets sync + Gmail + weekly review", color: C.scheduler.text },
+              { layer: "L3 → L2", title: "APIs down", desc: "Google/sensors unavailable → LLM uses last-known data, warns user", color: C.external.text },
+              { layer: "L2 → L1", title: "LLM down", desc: "Anthropic API unavailable → template fallbacks, whatNow() still works deterministically", color: C.pibL2.text },
+              { layer: "L1 → Core", title: "Always works", desc: "SQLite + whatNow() + pib.cli — no external dependencies required", color: C.pibL1.text },
             ].map((p, i) => (
               <div key={i} style={{
                 display: "flex", alignItems: "center", gap: 10,
                 padding: "6px 0",
-                borderBottom: i < 3 ? `1px solid ${C.border}` : "none",
+                borderBottom: i < 2 ? `1px solid ${C.border}` : "none",
               }}>
-                <Badge text={p.phase} color={p.color} />
-                <span style={{
-                  fontSize: 10, color: C.textDim, fontFamily: "monospace", minWidth: 48,
-                }}>
-                  {p.hours}
-                </span>
-                <span style={{ fontSize: 11, fontWeight: 600, color: C.text, minWidth: 100 }}>
+                <Badge text={p.layer} color={p.color} />
+                <span style={{ fontSize: 11, fontWeight: 600, color: C.text, minWidth: 80 }}>
                   {p.title}
                 </span>
                 <span style={{ fontSize: 10.5, color: C.textMid, flex: 1 }}>
@@ -646,12 +626,12 @@ export default function PIBSystemArchitecture() {
           gap: 8,
         }}>
           {[
-            { value: "8", label: "Adapters", color: C.adapters.text },
-            { value: "15", label: "LLM Tools", color: C.intel.text },
-            { value: "7", label: "DB Domains", color: C.storage.text },
-            { value: "51K", label: "Token Budget", color: C.intel.text },
+            { value: "3", label: "Mac Minis", color: C.hardware.text },
+            { value: "3", label: "Channels", color: C.channels.text },
+            { value: "6", label: "Security Layers", color: C.pibL1.text },
+            { value: "51K", label: "Token Budget", color: C.pibL2.text },
             { value: "3", label: "Claude Models", color: C.external.text },
-            { value: "10", label: "Invariants", color: C.hardware.text },
+            { value: "7", label: "DB Domains", color: C.storage.text },
           ].map((s, i) => (
             <div key={i} style={{
               background: C.card,

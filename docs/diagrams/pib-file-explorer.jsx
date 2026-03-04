@@ -71,9 +71,45 @@ function getFileIcon(name) {
 // ─── FILE TREE DATA ───
 const TREE = {
   name: "/opt/pib/",
-  desc: "Project root — Mac Mini COS-1 (headless, closet, always-on)",
+  desc: "Project root — Mac Mini pib-mini (headless, closet, always-on) — OpenClaw L0 infrastructure",
   tags: ["root"],
   children: [
+    {
+      name: "workspace-template/",
+      desc: "OpenClaw workspace template — intelligence files seeded by `openclaw init`",
+      children: [
+        { name: "SOUL.md", desc: "Core identity, values, coaching philosophy, privacy rules, calendar rules, custody config. The 'who PIB is' file. Loaded every session.", section: "L0", layer: 1 },
+        { name: "AGENTS.md", desc: "Agent definitions — what each agent does, routing rules, session protocols. Defines dev vs household agents.", section: "L0", layer: 1 },
+        { name: "HEARTBEAT.md", desc: "Heartbeat protocol — what runs on each cron tick. Unlogged detection, streak updates, proactive triggers.", section: "L0", layer: 1 },
+        { name: "USER.md", desc: "User constraints — ADHD profile, medication schedule, energy patterns, communication preferences.", section: "L0", layer: 1 },
+        { name: "TOOLS.md", desc: "Tool configuration — available tools, security policies, dev notes.", section: "L0", layer: 1 },
+        { name: "IDENTITY.md", desc: "System identity — name, version, personality traits, tone guidelines.", section: "L0", layer: 1 },
+        { name: "MEMORY.md", desc: "Memory protocol — what to remember, what to forget, promotion rules, dedup rules.", section: "L0", layer: 1 },
+      ],
+    },
+    {
+      name: "scripts/",
+      desc: "Operational scripts — setup, maintenance, recovery, core runtime",
+      children: [
+        {
+          name: "core/",
+          desc: "Core runtime scripts — calendar, context assembly, recurring tasks (planned .mjs files)",
+          children: [
+            { name: "README.md", desc: "Documents the core scripts inventory: calendar_read.mjs, calendar_write.mjs, calendar_sync.mjs, context_assembler.mjs, recurring_read.mjs, recurring_complete.mjs, streak_calc.mjs, ops_ledger.mjs.", section: "L0", layer: 1 },
+          ],
+        },
+        { name: "setup_google_oauth.py", desc: "Initial OAuth consent flow for Google APIs. Run once to authorize Calendar, Gmail, Sheets, Drive access.", section: "§12", layer: 3 },
+        { name: "seed_data.py", desc: "Seeds initial household data: 4 members, custody config, coach protocols, life phases, pib_config defaults.", section: "Appendix", layer: 1 },
+        { name: "cloud_backup.sh", desc: "Daily encrypted backup to Google Drive. sqlite3 .backup → age encrypt → upload.", section: "§12", layer: 1 },
+      ],
+    },
+    {
+      name: "console/",
+      desc: "Console dashboard server — Express :3333 (replaces old FastAPI :3141 static serving)",
+      children: [
+        { name: "README.md", desc: "Console implementation plan. Express server on :3333, reads SQLite SSOT directly, serves dashboard UI. Replaces old FastAPI web.py endpoints.", section: "L0", layer: 1 },
+      ],
+    },
     {
       name: "src/",
       desc: "Source code package — all PIB application logic",
@@ -92,9 +128,11 @@ const TREE = {
             { name: "sheets.py", desc: "Google Sheets bidirectional sync. DB→Sheets push every 15min (cron). Sheets→DB via Apps Script installable onChange trigger with queue pattern. Bootstrap import for existing Life OS data via The Loop (discover → propose → confirm → config). Conflict rule: most recent write wins with audit log. SHEETS_SYNC_CONFIG maps tabs (TASKS, ITEMS, LISTS, RECURRING, BUDGET) to DB tables.", section: "§9", layer: 3 },
             { name: "custody.py", desc: "Custody date math — DST-aware with 20+ test cases including spring forward and fall back. who_has_child() is pure deterministic given custody_config (alternating weeks, weekends+midweek, holiday overrides). Computes daily states for coverage gaps, transportation needs, activity schedules. Streaks auto-pause on custody-away days.", section: "§2.3, §4", layer: 1 },
             { name: "rewards.py", desc: "ADHD behavioral mechanics — 'dark prosthetics' that hack dopaminergic circuits. Variable-ratio reinforcement: 70% simple, 20% warm, 8% delight, 2% jackpot rewards. select_reward() uses random.random() for slot-machine psychology. complete_task_with_reward() chains: complete → update velocity → update streak → select reward → log → Zeigarnik hook. Streak logic: elastic (1 grace day), custody-aware, celebrates records.", section: "§5", layer: 1 },
-            { name: "web.py", desc: "FastAPI application. Routes: /api/* (REST), /webhooks/* (inbound), /dashboard (today view with per-actor views), /scoreboard (kitchen TV — dark bg, large text, auto-refresh 60s), /health (read-only probe for Healthchecks.io), /chat (web chat with SSE streaming). Rate limiter middleware. Cloudflare Access validation. Mounts static files. Entry point: uvicorn pib.web:app.", section: "§3.1, §5.5", layer: 1 },
-            { name: "auth.py", desc: "Authentication module. Cloudflare Access JWT validation (Google OAuth for James + Laura). Twilio X-Twilio-Signature HMAC validation. BlueBubbles shared secret header check. Siri Shortcuts Bearer token validation. Google Sheets service account key verification. Per-source rate limiting with configurable windows.", section: "§3.2–3.3", layer: 1 },
-            { name: "scheduler.py", desc: "APScheduler AsyncIOScheduler setup — NEVER BlockingScheduler (would freeze FastAPI event loop). Registers all cron jobs: calendar sync (*/15), recurring spawn (6am), budget refresh (7:15am), sheets push (*/15), proactive scan (*/30 7-22), morning digest (6am), memory promote (*/6h), health probe (*/30), backups (hourly), dead letter retry (4am), FTS5 rebuild (weekly), approval expiry (*/15), db size monitor (daily).", section: "§12 Cron", layer: 1 },
+            { name: "web.py", desc: "DEPRECATED — replaced by OpenClaw gateway + console/server.mjs. Kept for reference only.", section: "§3.1", layer: 1 },
+            { name: "auth.py", desc: "DEPRECATED — replaced by OpenClaw channel auth. Kept for reference only.", section: "§3.2", layer: 1 },
+            { name: "scheduler.py", desc: "DEPRECATED — replaced by OpenClaw cron engine. Kept for reference only.", section: "§12", layer: 1 },
+            { name: "cli.py", desc: "CLI permission boundary — THE integration surface for OpenClaw. 1,023 lines, 26 commands, 6-layer enforcement (allowlist → governance → SQL guard → rate limit → sanitizer → audit). Entry: python -m pib.cli <command> $PIB_DB_PATH [--json] [--member m-james].", section: "OpenClaw Integration", layer: 1 },
+            { name: "bootstrap_wizard.py", desc: "Bootstrap wizard (REPLACED by openclaw init + workspace-template/). Kept for reference.", section: "§12", layer: 1 },
             { name: "corrections.py", desc: "Misclassification correction system — Gene 1's feedback loop. handle_correction() processes 'fix:' and 'reclassify:' prefix commands. Updates RULES not just individual records: transaction_category → updates fin_merchant_rules, email_triage → updates ops_gmail_whitelist, task_domain → updates ops_tasks. Pattern: DISCOVER → user CORRECTS → CONFIG updated → future DETERMINISTIC execution uses corrected rule.", section: "§8.4", layer: 1 },
             { name: "backup.py", desc: "Backup and recovery. Hourly SQLite .backup to /opt/pib/data/backups/. backup_verify() restores to /tmp, runs PRAGMA integrity_check, deletes temp. cloud_backup() daily encrypted upload to Google Drive (age encryption). db_size_monitor() warns at 500MB, VACUUMs at 30% fragmentation. fts5_rebuild() weekly to fix silent staleness.", section: "§12", layer: 1 },
             { name: "cost.py", desc: "API cost tracking. track_api_cost() reads x-usage-input-tokens and x-usage-output-tokens response headers, computes per-request cost (Sonnet $3/$15 per M tokens, Opus $15/$75), accumulates in pib_config keyed by month. Surfaces monthly cost in weekly review digest and /dashboard.", section: "§12", layer: 1 },
@@ -126,15 +164,19 @@ const TREE = {
         { name: "001_initial_schema.sql", desc: "Bootstrap — all CREATE TABLE statements for all 7 domain prefixes (common_*, ops_*, cal_*, fin_*, mem_*, pib_*, meta_*). All indexes, CHECK constraints, FTS5 virtual tables. The entire database structure in one file.", section: "§3.8", layer: 1 },
         { name: "002_add_energy_states.sql", desc: "Adds pib_energy_states table (medication tracking, sleep quality, focus mode, completions, velocity cap). Adds default velocity_cap config. DOWN: DROP TABLE + DELETE config.", section: "§3.8", layer: 1 },
         { name: "003_add_pib_config.sql", desc: "Adds pib_config table for runtime configuration (model IDs, thresholds, feature flags). Seeds initial config values. DOWN: DROP TABLE.", section: "§3.8", layer: 1 },
+        { name: "004–008", desc: "Incremental schema additions (indexes, FTS5 tables, privacy fence columns, sensor tables, cron metadata).", section: "§3.8", layer: 1 },
+        { name: "009_openclaw_l0.sql", desc: "OpenClaw L0 migration — adds channel routing metadata, cron job config table, model routing preferences. Replaces APScheduler state.", section: "L0", layer: 1 },
       ],
     },
     {
       name: "config/",
       desc: "Credentials and configuration — chmod 600, owned by pib user",
       children: [
-        { name: ".env", desc: "All secrets: ANTHROPIC_API_KEY, TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, GOOGLE_SA_KEY_PATH, BLUEBUBBLES_SECRET, CLOUDFLARE_TUNNEL_TOKEN, BACKUP_PUBLIC_KEY (age), PIB_SHEETS_WEBHOOK_TOKEN. Never committed to version control. Key rotation schedule: Anthropic quarterly, Twilio annually, BlueBubbles after macOS updates.", section: "§12", layer: 1 },
-        { name: "google-sa-key.json", desc: "Google service account key for server-to-server auth. Used by Calendar API, Sheets API, Gmail API, Drive API (backups). Downloaded from Google Cloud Console. Domain-wide delegation for calendar access.", section: "§12", layer: 3 },
-        { name: "cloudflare-tunnel.yaml", desc: "Cloudflare Tunnel configuration. Routes: /api/*, /webhooks/*, /dashboard, /scoreboard, /health → localhost:3141. Ingress rules and access policies.", section: "§3.1", layer: 1 },
+        { name: ".env", desc: "All secrets: ANTHROPIC_API_KEY, TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, BLUEBUBBLES_SECRET, SIRI_BEARER_TOKEN, PIB_DB_PATH, PIB_PORT. Never committed. Created from .env.example.", section: "§12", layer: 1 },
+        { name: ".env.example", desc: "Template for .env with all required keys documented. Copy → fill in → chmod 600.", section: "§12", layer: 1 },
+        { name: "governance.yaml", desc: "Action permission gates. 13 actions: true (auto), confirm (human yes), off (disabled). E.g. task_create: true, calendar_hold_create: confirm, financial_write: off.", section: "OpenClaw Integration", layer: 1 },
+        { name: "agent_capabilities.yaml", desc: "5 agent roles (dev, cos, coach, infra, viewer) with command allowlists. 6-layer enforcement model for CLI.", section: "OpenClaw Integration", layer: 1 },
+        { name: "com.pib.runtime.plist", desc: "launchd plist for auto-start. Update paths for OpenClaw deployment.", section: "§12", layer: 1 },
       ],
     },
     {
@@ -187,12 +229,34 @@ const TREE = {
       ],
     },
     {
-      name: "static/",
-      desc: "Web frontend assets — served by FastAPI static mount",
+      name: "console/",
+      desc: "Dashboard server + UI — Express on :3333 (replaces old static/ + FastAPI serving)",
       children: [
-        { name: "dashboard.html", desc: "Main dashboard page. Per-actor views: James sees carousel (ONE card, micro-script, Done/Skip/Dismiss), Laura sees compressed (decisions [Y/N] + tasks + household status). Fetches /api/what-now, /api/tasks, /api/schedule, /api/budget. JavaScript + CSS inline.", section: "§2.1, §2.2", layer: 1 },
-        { name: "scoreboard.html", desc: "Kitchen TV display at /scoreboard. Dark background, large text, readable from 10 feet. Auto-refresh every 60 seconds via fetch(/api/scoreboard-data). Shows: per-member streaks + completions + next task + weekly points, Captain status (walked/fed/next), family total vs target.", section: "§5.5", layer: 1 },
-        { name: "chat.html", desc: "Web chat interface. SSE streaming for real-time LLM responses. Supports tool use visualization (up to 5 tool rounds). Message history with sliding window. State commands (meds, sleep) handled before LLM. Prefix commands work without LLM (Layer 1).", section: "§7.6", layer: 1 },
+        { name: "README.md", desc: "Stub. Console server + dashboard built by OpenClaw agent during bootstrap Phase 7. References docs/diagrams/pib-console-wired.jsx prototype and docs/pib-api-contract.md.", section: "OpenClaw Integration", layer: 1 },
+        { name: "server.mjs", desc: "(To be created) Express server on port 3333. REST API reading SQLite via pib.cli. Serves dashboard, scoreboard, chat. Separate from OpenClaw gateway.", section: "§5.5", layer: 1 },
+        { name: "index.html", desc: "(To be created) Dashboard UI — carousel (James), compressed (Laura), child view (Charlie), scoreboard (TV). Based on pib-console-wired.jsx prototype.", section: "§2.1, §2.2, §5.5", layer: 1 },
+      ],
+    },
+    {
+      name: "scripts/core/",
+      desc: "OpenClaw integration scripts — .mjs glue between OpenClaw and pib.cli",
+      children: [
+        { name: "README.md", desc: "Documents expected scripts: calendar_sync.mjs, context_assembler.mjs, what_now.mjs, heartbeat_check.mjs. Built by agent during Phase 7.", section: "OpenClaw Integration", layer: 1 },
+        { name: "calendar_sync.mjs", desc: "(To be created) gog calendar events --json → pib.cli calendar-ingest. Incremental (*/15 min) + full (daily 2AM).", section: "OpenClaw Integration", layer: 1 },
+        { name: "context_assembler.mjs", desc: "(To be created) Calls pib.cli context → system prompt with calendar, tasks, budget, memory.", section: "OpenClaw Integration", layer: 1 },
+        { name: "heartbeat_check.mjs", desc: "(To be created) SQLite health + gog auth + backup freshness checks.", section: "OpenClaw Integration", layer: 1 },
+      ],
+    },
+    {
+      name: "workspace-template/",
+      desc: "OpenClaw agent workspace files — copy into ~/.openclaw/workspace/ during bootstrap",
+      children: [
+        { name: "SOUL.md", desc: "PIB personality. ADHD-aware coaching, per-member voice rules, privacy fence, Gene invariants, dark prosthetics (rewards, streaks, friction asymmetry), custody rhythms.", section: "§2, §5", layer: 1 },
+        { name: "AGENTS.md", desc: "Message routing tables. Maps user intents → pib.cli commands. Cron schedule. Permission model. What the agent does and doesn't do.", section: "OpenClaw Integration", layer: 1 },
+        { name: "HEARTBEAT.md", desc: "Health check instructions. 7 probes: PIB health, Google auth, DB writable, console, disk, backup, calendar sync.", section: "OpenClaw Integration", layer: 1 },
+        { name: "USER.md", desc: "Family constraints. Members, custody schedule, timezone, communication preferences.", section: "§2", layer: 1 },
+        { name: "TOOLS.md", desc: "Tool reference. pib.cli usage, gog CLI, database path, console server.", section: "OpenClaw Integration", layer: 1 },
+        { name: "IDENTITY.md", desc: "Agent identity. Name: Poopsy (PIB v5), Role: Household Chief of Staff.", section: "OpenClaw Integration", layer: 1 },
       ],
     },
     {
@@ -202,7 +266,9 @@ const TREE = {
         { name: "com.pib.runtime.plist", desc: "launchd plist for PIB FastAPI server. RunAtLoad=true, KeepAlive=true (restart on crash). WorkingDirectory=/opt/pib. ProgramArguments: /opt/pib/venv/bin/uvicorn pib.web:app --host 0.0.0.0 --port 3141. StandardOutPath/StandardErrorPath → /opt/pib/logs/. Install: launchctl load com.pib.runtime.plist.", section: "§3.1, §12", layer: 1 },
       ],
     },
-    { name: "pyproject.toml", desc: "Python project config. Defines package metadata, dependencies (fastapi, aiosqlite, apscheduler, httpx, anthropic, python-dotenv), dev dependencies (pytest, pytest-asyncio, coverage). Tool configs: [tool.pytest.ini_options] asyncio_mode='auto', [tool.coverage.run] source=['src/pib'].", section: "§13.2", layer: 1 },
+    { name: "BOOTSTRAP_INSTRUCTIONS.md", desc: "Step-by-step guide for bootstrapping a new PIB installation. Covers: openclaw init, workspace-template setup, SQLite migration, seed data, gog CLI auth, launchd configuration.", section: "L0", layer: 1 },
+    { name: "PERSONAL_MINI_SETUP.md", desc: "Guide for setting up Bridge Minis (James/Laura). Covers: BlueBubbles install, Apple Shortcuts configuration, sensor webhook setup, HomeKit bridge (Homebridge) for James.", section: "L0", layer: 1 },
+    { name: "pyproject.toml", desc: "Python project config. Defines package metadata, dependencies (aiosqlite, httpx, python-dotenv), dev dependencies (pytest, pytest-asyncio, coverage). Note: FastAPI/APScheduler removed — replaced by OpenClaw gateway + cron.", section: "§13.2", layer: 1 },
     { name: "pytest.ini", desc: "pytest configuration. testpaths=tests, asyncio_mode=auto. Markers: unit (pure functions, no DB), integration (in-memory SQLite), e2e (real adapters).", section: "§13.2", layer: 1 },
     { name: "README.md", desc: "Project documentation. What PIB is (prosthetic prefrontal cortex), the Nine Genes, the Four Actors, setup instructions, build order (4 phases), operational runbook references.", section: "—", layer: 1 },
   ],

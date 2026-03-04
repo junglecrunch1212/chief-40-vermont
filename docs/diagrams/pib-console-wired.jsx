@@ -8,7 +8,7 @@ const MEMBERS = [
 ];
 
 // ─── API LAYER ───
-const BASE = ""; // Same origin — Express serves both API and console
+const BASE = ""; // Same origin — Console Express server on :3333 (NOT old FastAPI :3141)
 
 async function apiFetch(path, opts = {}) {
   const res = await fetch(`${BASE}${path}`, {

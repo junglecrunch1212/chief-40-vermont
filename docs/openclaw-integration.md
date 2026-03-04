@@ -70,7 +70,7 @@ These PIB v5 components overlap with OpenClaw infrastructure. Replace them with 
 
 `llm.py` contains:
 - Anthropic client management → **DROP** (OpenClaw routes to models)
-- Tool definitions (20 tools) → **KEEP as concept, reframe as agent instructions.** Instead of Anthropic tool_use format, these become routing rules in AGENTS.md: "when user says X, run `python -m pib.cli what-now --member m-james`"
+- Tool definitions (20 tools) → **KEEP as concept, reframe as agent instructions.** Instead of Anthropic tool_use format, these become routing rules in AGENTS.md: "when user says X, run `python -m pib.cli what-now $PIB_DB_PATH --member m-james`"
 - Context assembly (`assemble_context`, `build_cross_domain_summary`, `build_calendar_context`) → **KEEP logic, port to a script.** This becomes `scripts/core/context_assembler.mjs` (or `.py`) that the agent calls to build its system prompt.
 - Relevance detection (`analyze_relevance`) → **KEEP.** Either port to JS or call from Python.
 - System prompt builder → **MOVE to SOUL.md + AGENTS.md.** OpenClaw agents get their personality from SOUL.md and their routing from AGENTS.md. The per-member persona rules (James = ADHD carousel, Laura = brief/no-preamble) go in SOUL.md.
@@ -87,23 +87,23 @@ Every APScheduler job becomes an OpenClaw cron entry. Map:
 |---|---|---|
 | `calendar_incremental_sync` | `*/15 * * * *` | `node scripts/core/calendar_sync.mjs --incremental` |
 | `calendar_full_sync` | `0 2 * * *` | `node scripts/core/calendar_sync.mjs --full` |
-| `compute_daily_states` | `30 5 * * *` | `python -m pib.cli compute-daily-states` |
-| `recurring_spawn` | `0 6 * * *` | `python -m pib.cli recurring-spawn` |
-| `escalation_check` | `0 17 * * *` | `python -m pib.cli escalation-check` |
-| `morning_digest` | `15 7 * * *` | `python -m pib.cli morning-digest --member m-james` |
-| `proactive_trigger_scan` | `*/30 7-22 * * *` | `python -m pib.cli proactive-scan` |
-| `auto_promote_session_facts` | `0 */6 * * *` | `python -m pib.cli promote-facts` |
-| `push_to_sheets` | `*/15 * * * *` | `python -m pib.cli push-sheets` |
+| `compute_daily_states` | `30 5 * * *` | `python -m pib.cli compute-daily-states $PIB_DB_PATH` |
+| `recurring_spawn` | `0 6 * * *` | `python -m pib.cli recurring-spawn $PIB_DB_PATH` |
+| `escalation_check` | `0 17 * * *` | `python -m pib.cli escalation-check $PIB_DB_PATH` |
+| `morning_digest` | `15 7 * * *` | `python -m pib.cli morning-digest $PIB_DB_PATH --member m-james` |
+| `proactive_trigger_scan` | `*/30 7-22 * * *` | `python -m pib.cli proactive-scan $PIB_DB_PATH` |
+| `auto_promote_session_facts` | `0 */6 * * *` | `python -m pib.cli promote-facts $PIB_DB_PATH` |
+| `push_to_sheets` | `*/15 * * * *` | `python -m pib.cli push-sheets $PIB_DB_PATH` |
 | `health_probe` | `*/30 * * * *` | OpenClaw heartbeat (HEARTBEAT.md) |
-| `sqlite_backup` | `0 * * * *` | `python -m pib.cli backup` |
-| `cleanup_expired` | `0 3 * * *` | `python -m pib.cli cleanup` |
-| `fts5_rebuild` | `0 2 * * 0` | `python -m pib.cli fts5-rebuild` |
-| `extraction_worker` | `*/5 * * * *` | `python -m pib.cli extraction-worker` |
-| `unsnooze_comms` | `*/15 * * * *` | `python -m pib.cli unsnooze` |
-| `expire_stale_drafts` | `0 22 * * *` | `python -m pib.cli expire-drafts` |
-| `synthesize_voice_profiles` | `0 3 * * 0` | `python -m pib.cli synthesize-voices` |
+| `sqlite_backup` | `0 * * * *` | `python -m pib.cli backup $PIB_DB_PATH` |
+| `cleanup_expired` | `0 3 * * *` | `python -m pib.cli cleanup $PIB_DB_PATH` |
+| `fts5_rebuild` | `0 2 * * 0` | `python -m pib.cli fts5-rebuild $PIB_DB_PATH` |
+| `extraction_worker` | `*/5 * * * *` | `python -m pib.cli extraction-worker $PIB_DB_PATH` |
+| `unsnooze_comms` | `*/15 * * * *` | `python -m pib.cli unsnooze $PIB_DB_PATH` |
+| `expire_stale_drafts` | `0 22 * * *` | `python -m pib.cli expire-drafts $PIB_DB_PATH` |
+| `synthesize_voice_profiles` | `0 3 * * 0` | `python -m pib.cli synthesize-voices $PIB_DB_PATH` |
 
-**Action required:** Add a `pib.cli` module (thin CLI wrapper) that exposes each job as a subcommand. OpenClaw cron calls these via `exec`.
+**✅ DONE:** `src/pib/cli.py` exists (1,023 lines, 26 commands, 6-layer permission boundary) that exposes each job as a subcommand. OpenClaw cron calls these via `exec`.
 
 ### 3.4 `auth.py` (127 lines) → OpenClaw channel auth
 
@@ -115,7 +115,7 @@ The bootstrap wizard (env var setup, credential wiring) is replaced by:
 1. `openclaw init` (creates workspace)
 2. `gog auth login` (Google)
 3. Manual `.env` setup for Anthropic, Twilio, BlueBubbles keys
-4. `python -m pib.cli bootstrap` (SQLite schema + seed data)
+4. `python -m pib.cli bootstrap $PIB_DB_PATH` (SQLite schema + seed data)
 
 ---
 
@@ -129,7 +129,7 @@ OpenClaw scripts (`.mjs`) call Python via `child_process.execFile` or `exec`:
 // scripts/core/what_now.mjs
 import { execSync } from 'child_process';
 const result = JSON.parse(
-  execSync('python -m pib.cli what-now --member m-james --json', {
+  execSync('python -m pib.cli what-now $PIB_DB_PATH --member m-james --json', {
     cwd: '/path/to/pib',
     env: { ...process.env, PIB_DB_PATH: '/path/to/pib.db' },
   }).toString()
@@ -147,16 +147,16 @@ In AGENTS.md, define routing tables:
 
 | User says | Route to |
 |---|---|
-| "What's next?" / "what now" | `python -m pib.cli what-now --member {member_id} --json` |
-| "Who has Charlie?" | `python -m pib.cli custody --date {today} --json` |
-| "grocery: milk, eggs" | `python -m pib.cli ingest --prefix --text "{message}" --json` |
-| "meds taken" | `python -m pib.cli state --action medication_taken --member {member_id}` |
-| "done" / "mark [task] done" | `python -m pib.cli complete --task {task_id} --member {member_id} --json` |
+| "What's next?" / "what now" | `python -m pib.cli what-now $PIB_DB_PATH --member {member_id} --json` |
+| "Who has Charlie?" | `python -m pib.cli custody $PIB_DB_PATH --date {today} --json` |
+| "grocery: milk, eggs" | `python -m pib.cli ingest $PIB_DB_PATH --prefix --text "{message}" --json` |
+| "meds taken" | `python -m pib.cli state $PIB_DB_PATH --action medication_taken --member {member_id}` |
+| "done" / "mark [task] done" | `python -m pib.cli complete $PIB_DB_PATH --task {task_id} --member {member_id} --json` |
 | [anything else] | Full LLM chat with context assembly |
 ```
 
 For full LLM chat, the agent:
-1. Calls `python -m pib.cli context --member {member_id} --message "{message}" --json` to get assembled context
+1. Calls `python -m pib.cli context $PIB_DB_PATH --member {member_id} --message "{message}" --json` to get assembled context
 2. Uses that context in its own system prompt
 3. Has tool-call routing to PIB CLI commands for writes
 
@@ -179,7 +179,7 @@ Google Calendar API
        │
        ▼
   calendar_sync.mjs (OpenClaw cron, every 15 min)
-       │  calls: python -m pib.cli calendar-ingest --json
+       │  calls: python -m pib.cli calendar-ingest $PIB_DB_PATH --json
        ▼
   cal_raw_events → cal_classified_events (SQLite)
        │
@@ -300,7 +300,7 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
-OpenClaw calls this via `python -m pib.cli <command> --json` and reads stdout.
+OpenClaw calls this via `python -m pib.cli <command> $PIB_DB_PATH --json` and reads stdout.
 
 ---
 
@@ -338,7 +338,7 @@ git clone https://github.com/junglecrunch1212/chief-40-vermont.git pib
 cd pib && pip install -e ".[dev]" && cd ..
 
 # 5. Initialize SQLite
-python -m pib.cli bootstrap            # Apply schema + seed data
+python -m pib.cli bootstrap $PIB_DB_PATH            # Apply schema + seed data
 
 # 6. Write SOUL.md, AGENTS.md, HEARTBEAT.md
 # (Agent can generate these from pib-v5-build-spec.md §2 and §4)
@@ -353,7 +353,7 @@ openclaw gateway start
 node console/server.mjs &
 
 # 10. Verify
-python -m pib.cli what-now --member m-james --json
+python -m pib.cli what-now $PIB_DB_PATH --member m-james --json
 # Should return a task with micro_script
 ```
 
@@ -365,10 +365,10 @@ After refactor, the system should pass these probes:
 
 | Probe | Command | Expected |
 |---|---|---|
-| whatNow works | `python -m pib.cli what-now --member m-james --json` | Returns one task with micro_script |
-| State machine works | `python -m pib.cli complete --task tsk-001 --member m-james --json` | Returns reward tier + streak |
-| Custody works | `python -m pib.cli custody --json` | Returns parent member_id |
-| Calendar syncs | `gog calendar events --json` then `python -m pib.cli calendar-ingest` | Events in `cal_classified_events` |
+| whatNow works | `python -m pib.cli what-now $PIB_DB_PATH --member m-james --json` | Returns one task with micro_script |
+| State machine works | `python -m pib.cli complete $PIB_DB_PATH --task tsk-001 --member m-james --json` | Returns reward tier + streak |
+| Custody works | `python -m pib.cli custody $PIB_DB_PATH --json` | Returns parent member_id |
+| Calendar syncs | `gog calendar events --json` then `python -m pib.cli calendar-ingest $PIB_DB_PATH` | Events in `cal_classified_events` |
 | Messaging works | Send "what's next?" via Signal | Agent responds with whatNow result |
 | Offline resilience | Kill Anthropic key, send "what's next?" | Agent uses Layer 1 fallback |
 | Console serves | `curl localhost:3333/api/what-now/m-james` | JSON response |

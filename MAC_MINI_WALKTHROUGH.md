@@ -449,7 +449,7 @@ Deploy chief-40-vermont on this OpenClaw instance per docs/openclaw-integration.
 ## Phase 1: Deploy
 1. Clone chief-40-vermont repo into this workspace
 2. Install Python package (pip install -e ".[dev]")
-3. Write pib/src/pib/cli.py (the CLI integration surface)
+3. ✅ `src/pib/cli.py` already exists (1,023 lines, 26 commands, 6-layer permission boundary)
 4. Initialize SQLite (apply migrations, seed data)
 5. Write OpenClaw cron jobs (from integration spec §3.3)
 6. Write scripts/core/ wrappers (from integration spec §4)
@@ -901,7 +901,7 @@ Don't do anything — just be ready to respond when I come back after reboot.
 
 | # | When | What it does | Time |
 |---|---|---|---|
-| 1 | After pre-flight checklist passes | Clone repo, install Python, write cli.py, init SQLite | 1-2 hours |
+| 1 | After pre-flight checklist passes | Clone repo, install Python, init SQLite (cli.py already exists) | 1-2 hours |
 | 2 | After agent reports Phase 1 done | Verify engine works | 5 min |
 | 3 | After Prompt 2 passes | Discover + classify calendars | 30 min |
 | 4 | After agent shows calendar proposals | Confirm classifications, run first sync | 30 min |

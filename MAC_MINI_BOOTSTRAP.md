@@ -301,14 +301,14 @@ Deploy chief-40-vermont on this OpenClaw instance per docs/openclaw-integration.
 
 ## Phase 1: Deploy
 1. Clone chief-40-vermont repo
-2. Install Python package (pip install -e ".[dev]")
-3. Write pib/src/pib/cli.py (the CLI integration surface)
-4. Initialize SQLite (apply migrations, seed data)
-5. Write OpenClaw cron jobs (from integration spec §3.3)
-6. Write scripts/core/ wrappers (from integration spec §4)
-7. Build console server
-8. Expand SOUL.md from build spec
-9. Write routing tables in this file
+2. Install Python package (`pip install -e ".[dev]"`)
+3. ✅ `src/pib/cli.py` already exists (1,023 lines, 26 commands, 6-layer permission boundary)
+4. Initialize SQLite: `python -m pib.cli bootstrap $PIB_DB_PATH`
+5. Copy `workspace-template/` files into OpenClaw workspace (SOUL.md, AGENTS.md, etc.)
+6. Write OpenClaw cron jobs (from AGENTS.md cron table)
+7. Write `scripts/core/` wrappers (see `scripts/core/README.md`)
+8. Build console server (see `console/README.md`)
+9. Write routing tables in this file (see `workspace-template/AGENTS.md` for reference)
 10. Run all probes from integration spec §9
 
 ## Phase 2: Operate
@@ -348,7 +348,7 @@ Create `~/.openclaw/workspace/HEARTBEAT.md`:
 ```markdown
 # HEARTBEAT.md
 
-Run: python -m pib.cli health --json
+Run: python -m pib.cli health $PIB_DB_PATH --json
 
 Report any items with status "error" or "warn". If all "ok", reply HEARTBEAT_OK.
 
@@ -375,7 +375,7 @@ Create `~/.openclaw/workspace/TOOLS.md`:
 # TOOLS.md
 
 ## Python CLI (PIB engine)
-All PIB domain logic is accessed via: python -m pib.cli <command> --json
+All PIB domain logic is accessed via: python -m pib.cli <command> $PIB_DB_PATH [--json '{}'] [--member m-james]
 See docs/openclaw-integration.md §6 for all subcommands.
 Working directory: ~/.openclaw/workspace/pib/
 Database: ~/.openclaw/workspace/state/pib.db
@@ -635,7 +635,7 @@ After the agent reports deployment complete, verify yourself:
 
 ```bash
 # 1. Engine works
-python -m pib.cli what-now --member m-james --json
+python -m pib.cli what-now $PIB_DB_PATH --member m-james --json
 
 # 2. Tests pass
 cd ~/.openclaw/workspace/pib && pytest tests/ -v
@@ -648,7 +648,7 @@ open http://localhost:3333/scoreboard
 
 # 5. Calendar syncs
 gog calendar events --from $(date +%Y-%m-%d) --json | head -5
-python -m pib.cli calendar-ingest --json
+python -m pib.cli calendar-ingest $PIB_DB_PATH --json
 
 # 6. Messaging works (send from your phone)
 # Text "what's next?" via Signal/WhatsApp/iMessage

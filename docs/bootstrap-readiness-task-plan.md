@@ -43,12 +43,12 @@ These are provided by OpenClaw L0. PIB does not build or manage them:
 
 ## P0 — Foundation & Security
 
-### T-001: Startup Validation
+### T-001: Startup Validation ✅ DONE
 - `pib.cli bootstrap` validates: Python version ≥ 3.12, SQLite with FTS5, `PIB_DB_PATH` writable, required config present.
 - Fails fast with actionable error messages if anything is missing.
 - **DoD:** `pib.cli bootstrap` either succeeds or prints exactly what's wrong and how to fix it.
 
-### T-002: Privacy & PII Guardrails (Gene 7 #5)
+### T-002: Privacy & PII Guardrails (Gene 7 #5) ✅ DONE
 - Read-layer privacy fence enforced: `privacy: full/privileged/redacted` on all calendar events.
 - Laura's work calendar content (`privileged`) never enters LLM context — filtered in `build_calendar_context()`, not in prompts.
 - PII-safe logging: no raw calendar titles, no email bodies, no phone numbers in log output.
@@ -175,7 +175,7 @@ These are provided by OpenClaw L0. PIB does not build or manage them:
 - Restore drill: documented procedure, tested quarterly.
 - **DoD:** `pib.cli backup` creates verified backup. `pib.cli restore --from backups/pib-xxx.db` restores to known state.
 
-### T-042: Migration Safety
+### T-042: Migration Safety ✅ DONE
 - `meta_migrations` table tracks applied migrations with checksums.
 - Every migration has `up_sql` and `down_sql`.
 - `pib.cli migrate` backs up DB before applying, rolls back on failure.
@@ -210,14 +210,14 @@ These are provided by OpenClaw L0. PIB does not build or manage them:
 
 ## P2 — Quality & Completeness
 
-### T-060: Test Coverage
+### T-060: Test Coverage ✅ DONE (507+ tests)
 - Existing: 20 unit/integration test files (engine, state machine, custody, energy, rewards, streaks, memory, privacy, voice, ingest, web).
 - Add: E2E tests with mock adapters (mock `gog` CLI output, mock OpenClaw channel).
 - Add: Canary tests for privacy (T-002).
 - Add: Invariant tests for all Gene 7 rules.
 - **DoD:** `pytest tests/ -v` covers all critical paths. CI gate optional but recommended.
 
-### T-061: Cost Governance
+### T-061: Cost Governance ✅ DONE
 - `cost.py` tracks per-model token usage.
 - Monthly spend alert when approaching budget threshold.
 - Auto-degrade: switch to cheaper model tier when 80% of budget consumed.

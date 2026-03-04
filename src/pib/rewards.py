@@ -4,6 +4,8 @@ import logging
 import random
 from datetime import date
 
+from pib.tz import now_et
+
 log = logging.getLogger(__name__)
 
 # ─── Variable-Ratio Reward Schedule ───
@@ -158,7 +160,7 @@ async def get_completion_stats(db, member_id: str, task_id: str | None = None) -
             try:
                 from datetime import datetime
                 created = datetime.fromisoformat(task_row["created_at"].replace("Z", "+00:00"))
-                days_old = (datetime.now(created.tzinfo) - created).days
+                days_old = (now_et() - created.astimezone(now_et().tzinfo)).days
             except (ValueError, TypeError):
                 days_old = 0
 

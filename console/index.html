@@ -166,7 +166,7 @@ const SETTINGS_TABS = ['health','costs','models','sources','phases','config','bu
 const SETTINGS_LABELS = {health:'System Health',costs:'Costs',models:'AI Models',sources:'Sources',phases:'Life Phases',config:'Config',budget:'Budget',household:'Household',permissions:'Permissions',coaching:'Coaching',gates:'Gates',channels:'Channels',memory:'Memory',captures:'Captures'};
 
 let currentPage = 'today';
-let currentActor = localStorage.getItem('pib-actor') || 'm-james';
+let currentActor = localStorage.getItem('pib-actor-override') || localStorage.getItem('pib-actor') || 'm-james';
 let settingsTab = 'health';
 let chatSessionId = 'sess-' + Date.now();
 let chatMessages = [];
@@ -342,6 +342,7 @@ function renderSidebar() {
 
 function switchActor(id) {
   if (authenticatedMember && authenticatedMember.role !== 'parent') return;
+  console.log('switchActor →', id);
   currentActor = id;
   localStorage.setItem('pib-actor-override', id);
   const actor = MEMBERS.find(m => m.id === id);

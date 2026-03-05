@@ -1107,6 +1107,13 @@ app.get("/api/config", requireParent, (req, res) => {
   res.json({ config: rows });
 });
 
+// Alias for settings tab
+app.get("/api/settings/config", requireParent, (req, res) => {
+  const d = getDB();
+  const rows = d.prepare("SELECT key, value as val, description as desc FROM pib_config ORDER BY key").all();
+  res.json({ config: rows });
+});
+
 app.post("/api/config/:key", requireParent, guardedWrite("config_set", (req, res) => {
   const key = req.params.key;
   if (!/^[a-zA-Z0-9_]+$/.test(key)) {
@@ -1187,8 +1194,8 @@ app.get("/api/settings/channels", requireParent, (req, res) => {
 // --- Settings: System Health ---
 app.get("/api/settings/system-health", requireParent, (req, res) => {
   const d = getDB();
-  const backups = d.prepare("SELECT * FROM common_audit_log ORDER BY created_at DESC LIMIT 1").get();
-  res.json({ status: 'unhealthy', uptime: 0, python: false, lastAudit: backups?.created_at || null });
+  const backups = d.prepare("SELECT * FROM common_audit_log ORDER BY ts DESC LIMIT 1").get();
+  res.json({ status: 'unhealthy', uptime: 0, python: false, lastAudit: backups?.ts || null });
 });
 
 // --- Settings: Costs ---

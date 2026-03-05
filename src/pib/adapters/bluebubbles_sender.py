@@ -6,6 +6,7 @@ Credentials: BLUEBUBBLES_{MEMBER}_SECRET and BLUEBUBBLES_{MEMBER}_URL.
 
 import logging
 import os
+import re
 
 import httpx
 
@@ -21,7 +22,10 @@ class BlueBubblesSender:
     def __init__(self):
         # Per-bridge configuration
         self._bridges = {}
-        for member in ("JAMES", "LAURA"):
+        # Auto-discover bridge members from BLUEBUBBLES_*_SECRET env vars
+        members = [m.group(1) for key in os.environ
+                   if (m := re.match(r'BLUEBUBBLES_(\w+)_SECRET', key))]
+        for member in members:
             url = os.environ.get(f"BLUEBUBBLES_{member}_URL", "").rstrip("/")
             secret = os.environ.get(f"BLUEBUBBLES_{member}_SECRET", "")
             if url and secret:
@@ -60,9 +64,8 @@ class BlueBubblesSender:
         member_key = member_id.replace("m-", "").lower() if member_id else ""
         if member_key in self._bridges:
             return self._bridges[member_key]
-        # Fallback to first available bridge
-        if self._bridges:
-            return next(iter(self._bridges.values()))
+        # No fallback — refuse to send if member_id doesn't match a known bridge
+        log.error(f"No BlueBubbles bridge for member_id={member_id!r} (resolved key={member_key!r})")
         return None
 
     async def send(self, message) -> dict:

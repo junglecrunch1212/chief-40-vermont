@@ -419,7 +419,7 @@ Then in Twilio console: Phone Number → your number → Messaging → Webhook U
 
 | Port | Service | Notes |
 |------|---------|-------|
-| 3141 | PIB CoS API (Python) | Direct CLI access, sensor ingest |
+| 3333 | Console + API (Express) | Dashboard, sensor ingest, webhooks |
 | 3333 | Console dashboard | Kitchen TV scoreboard, web UI |
 | 18789 | OpenClaw gateway | Internal, don't expose externally |
 | 1234 | BlueBubbles server | Local only (per bridge Mini) |

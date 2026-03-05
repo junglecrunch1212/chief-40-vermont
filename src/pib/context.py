@@ -488,8 +488,14 @@ async def build_calendar_context(db, start_date: str, end_date: str, member_id: 
 
 # ─── Context Assembly ───
 
-async def assemble_context(db, member_id: str, message: str) -> str:
-    """Assemble the full context block for the LLM: summary + calendar + memory + whatNow."""
+async def assemble_context(db, member_id: str, message: str, agent_id: str = "cos") -> str:
+    """Assemble the full context block for the LLM: summary + calendar + memory + whatNow.
+
+    agent_id controls data visibility:
+      - "coach": excludes financial data, budget context
+      - "cos": includes everything except Laura's work calendar titles (existing privacy fence)
+      - "dev": includes everything (admin)
+    """
     parts = []
 
     # Cross-domain summary (always included, scoped to member)
@@ -506,7 +512,8 @@ async def assemble_context(db, member_id: str, message: str) -> str:
         cal_ctx = await build_calendar_context(db, today, today, member_id)
         parts.append(f"SCHEDULE TODAY:\n{cal_ctx}")
 
-    if "financial" in relevance["assemblers"]:
+    # Financial data excluded for coach agent (privacy boundary)
+    if "financial" in relevance["assemblers"] and agent_id != "coach":
         budget_rows = await db.execute_fetchall("SELECT * FROM fin_budget_snapshot WHERE over_threshold = 1")
         if budget_rows:
             alerts = [f"  {r['category']}: ${r['spent']:.0f}/{r['budget']:.0f}" for r in budget_rows]

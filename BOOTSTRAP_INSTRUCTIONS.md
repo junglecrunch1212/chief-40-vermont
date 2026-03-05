@@ -192,7 +192,7 @@ Since this is a single-machine setup (no bridge Minis yet), BlueBubbles runs on 
 2. Install on Mac Mini
 3. Sign into iCloud with the Apple ID for iMessage
 4. Configure webhook:
-   - URL: `http://localhost:3141/webhooks/bluebubbles` (or OpenClaw's channel endpoint)
+   - URL: `http://localhost:3333/api/webhooks/bluebubbles` (or OpenClaw's channel endpoint)
    - Secret: match `BLUEBUBBLES_JAMES_SECRET` (or `BLUEBUBBLES_LAURA_SECRET` for Laura's bridge) in `.env`
 5. Enable auto-start (Login Items)
 6. Test: send an iMessage from your phone, verify webhook fires

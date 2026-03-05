@@ -13,7 +13,7 @@
  *   PIB_CALLER_AGENT     (set automatically when called by OpenClaw)
  */
 
-import { execSync } from "node:child_process";
+import { execSync, execFileSync } from "node:child_process";
 import { existsSync, statSync, readdirSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { join } from "node:path";
@@ -64,9 +64,9 @@ function addCheck(name, status, detail = "") {
   else if (status === "warn" && worstStatus !== "error") worstStatus = "warn";
 }
 
-function tryExec(cmd, timeout = 10_000) {
+function tryExec(file, args, timeout = 10_000) {
   try {
-    return execSync(cmd, {
+    return execFileSync(file, args, {
       encoding: "utf-8",
       timeout,
       env: { ...process.env, PIB_CALLER_AGENT: CALLER },
@@ -86,7 +86,7 @@ if (existsSync(DB_PATH)) {
 }
 
 // 2. PIB CLI health
-const healthRaw = tryExec(`python -m pib.cli health "${DB_PATH}" --json`);
+const healthRaw = tryExec("python", ["-m", "pib.cli", "health", DB_PATH, "--json"]);
 if (healthRaw) {
   try {
     const h = JSON.parse(healthRaw);
@@ -99,7 +99,7 @@ if (healthRaw) {
 }
 
 // 3. gog auth status
-const gogAuth = tryExec("gog auth status 2>&1");
+const gogAuth = tryExec("gog", ["auth", "status"]);
 if (gogAuth !== null) {
   const authed = /authenticated|logged in|valid/i.test(gogAuth);
   addCheck("gog_auth", authed ? "ok" : "warn", gogAuth.slice(0, 200));

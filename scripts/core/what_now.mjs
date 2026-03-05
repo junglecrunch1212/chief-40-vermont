@@ -11,7 +11,7 @@
  *   PIB_CALLER_AGENT     (set automatically when called by OpenClaw)
  */
 
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { parseArgs } from "node:util";
 
@@ -67,8 +67,7 @@ try {
     throw new Error(`Database not found: ${DB_PATH}`);
   }
 
-  const cmd = `python -m pib.cli what-now "${DB_PATH}" --member ${args.member} --json`;
-  const raw = execSync(cmd, {
+  const raw = execFileSync("python", ["-m", "pib.cli", "what-now", DB_PATH, "--member", args.member, "--json"], {
     encoding: "utf-8",
     timeout: 15_000,
     env: { ...process.env, PIB_CALLER_AGENT: CALLER },

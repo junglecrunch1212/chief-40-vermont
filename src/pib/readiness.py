@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 CRITICAL_ENV = [
@@ -44,9 +45,12 @@ async def evaluate_readiness(db) -> dict:
         checks[f"env_{key.lower()}"] = {"ok": _is_set(key), "required": True}
 
     # BlueBubbles: at least one bridge (secret+url pair) must be configured
+    # Auto-discover bridge members from BLUEBUBBLES_*_SECRET env vars
+    bb_members = [m.group(1) for key in os.environ
+                  if (m := re.match(r'BLUEBUBBLES_(\w+)_SECRET', key))]
     bridge_pairs = [
-        ("BLUEBUBBLES_JAMES_SECRET", "BLUEBUBBLES_JAMES_URL"),
-        ("BLUEBUBBLES_LAURA_SECRET", "BLUEBUBBLES_LAURA_URL"),
+        (f"BLUEBUBBLES_{member}_SECRET", f"BLUEBUBBLES_{member}_URL")
+        for member in bb_members
     ]
     any_bridge = False
     for secret_key, url_key in bridge_pairs:

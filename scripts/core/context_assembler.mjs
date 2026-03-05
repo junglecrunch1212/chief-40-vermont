@@ -11,7 +11,7 @@
  *   PIB_CALLER_AGENT     (set automatically when called by OpenClaw)
  */
 
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { parseArgs } from "node:util";
 
@@ -44,7 +44,7 @@ Env vars:
 }
 
 const DB_PATH = process.env.PIB_DB_PATH || "/opt/pib/data/pib.db";
-const CALLER = process.env.PIB_CALLER_AGENT || "openclaw";
+const CALLER = process.env.PIB_CALLER_AGENT || "cos";
 const jsonOut = args.json;
 
 function output(obj) {
@@ -68,10 +68,8 @@ try {
   }
 
   const payload = JSON.stringify({ message: args.message || "" });
-  const escaped = payload.replace(/'/g, "'\\''");
-  const cmd = `python -m pib.cli context "${DB_PATH}" --json '${escaped}' --member ${args.member}`;
 
-  const raw = execSync(cmd, {
+  const raw = execFileSync("python", ["-m", "pib.cli", "context", DB_PATH, "--json", payload, "--member", args.member], {
     encoding: "utf-8",
     timeout: 30_000,
     env: { ...process.env, PIB_CALLER_AGENT: CALLER },

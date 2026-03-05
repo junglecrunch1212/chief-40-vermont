@@ -50,6 +50,7 @@ agents:
       - "recurring-skip"        # → governance: recurring_mark_done (true)
       - "state-update"          # Record meds taken, sleep quality, energy
       - "capture"               # Quick capture to inbox
+      - "context"               # Assemble LLM context (agent-filtered)
       - "member-settings-get"   # Read per-member settings
       - "member-settings-set"   # → governance: member_settings_set (confirm)
       # Channel management (read-only for CoS)
@@ -89,20 +90,13 @@ agents:
       - "upcoming"
       - "search"
       - "health"
+      - "context"               # Assemble LLM context (agent-filtered, no financial data)
       # Writes (minimal — coaching only)
       - "state-update"          # Meds, sleep, energy, focus mode
       - "task-complete"         # "I did it!" flow
       - "recurring-done"        # Mark recurring complete
       - "recurring-skip"        # Skip with reason
-    blocked_cli_commands:
-      - "task-create"           # Coach doesn't create tasks
-      - "hold-create"           # Coach doesn't touch calendar
-      - "budget"                # Coach doesn't discuss money
-      - "migrate"
-      - "bootstrap"
-      - "backup"
-      - "fts5-rebuild"
-      - "seed"
+    blocked_cli_commands: "*"   # Everything not explicitly allowed (safe-by-default)
     filesystem: read-only
     sql: none
     privacy:

@@ -168,7 +168,7 @@ MAX_TOOL_ROUNDS = 5
 
 
 async def chat(db, message: str, member_id: str, channel: str = "web",
-               session_id: str | None = None) -> dict:
+               session_id: str | None = None, agent_id: str = "cos") -> dict:
     """Non-streaming chat handler. Returns complete response after all tool rounds."""
     session = await get_or_create_session(db, member_id, channel, session_id)
     sid = session["id"]
@@ -183,7 +183,7 @@ async def chat(db, message: str, member_id: str, channel: str = "web",
     protocols = await db.execute_fetchall("SELECT * FROM pib_coach_protocols WHERE active = 1")
     system_prompt = build_system_prompt(member, channel, [dict(p) for p in protocols] if protocols else [])
 
-    context = await assemble_context(db, member_id, message)
+    context = await assemble_context(db, member_id, message, agent_id=agent_id)
 
     history_msgs = await get_session_messages(db, sid)
     history = build_conversation_history(history_msgs, channel)
@@ -271,7 +271,7 @@ async def chat(db, message: str, member_id: str, channel: str = "web",
 # ─── Streaming Chat Handler ───
 
 async def stream_chat(db, message: str, member_id: str, channel: str = "web",
-                      session_id: str | None = None):
+                      session_id: str | None = None, agent_id: str = "cos"):
     """Streaming chat handler. Yields SSE-formatted chunks. Circuit breaker at 5 tool rounds."""
     session = await get_or_create_session(db, member_id, channel, session_id)
     sid = session["id"]
@@ -288,7 +288,7 @@ async def stream_chat(db, message: str, member_id: str, channel: str = "web",
     protocols = await db.execute_fetchall("SELECT * FROM pib_coach_protocols WHERE active = 1")
     system_prompt = build_system_prompt(member, channel, [dict(p) for p in protocols] if protocols else [])
 
-    context = await assemble_context(db, member_id, message)
+    context = await assemble_context(db, member_id, message, agent_id=agent_id)
     history_msgs = await get_session_messages(db, sid)
     history = build_conversation_history(history_msgs, channel)
     if history and history[-1].get("role") == "user" and history[-1].get("content") == message:

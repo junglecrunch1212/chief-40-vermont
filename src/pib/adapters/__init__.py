@@ -59,10 +59,13 @@ async def init_adapters(db) -> dict[str, bool]:
     else:
         results["gmail"] = False
 
-    # BlueBubbles sender (per-bridge: BLUEBUBBLES_JAMES_* / BLUEBUBBLES_LAURA_*)
+    # BlueBubbles sender (per-bridge: auto-discovered from BLUEBUBBLES_*_SECRET env vars)
+    import re
+    bb_members = [m.group(1) for key in os.environ
+                  if (m := re.match(r'BLUEBUBBLES_(\w+)_SECRET', key))]
     any_bb = any(
-        os.environ.get(f"BLUEBUBBLES_{m}_URL") and os.environ.get(f"BLUEBUBBLES_{m}_SECRET")
-        for m in ("JAMES", "LAURA")
+        os.environ.get(f"BLUEBUBBLES_{member}_URL") and os.environ.get(f"BLUEBUBBLES_{member}_SECRET")
+        for member in bb_members
     )
     if any_bb:
         try:

@@ -109,7 +109,35 @@ async def transition_task(db, task_id: str, new_status: str, update_data: dict, 
             raise ValueError(f"Disallowed column in task update: {col_name}")
 
     params.append(task_id)
+    old_status = task["status"] if isinstance(task, dict) else task["status"]
     await db.execute(f"UPDATE ops_tasks SET {', '.join(sets)} WHERE id = ?", params)
+
+    # ── Audit log ──
+    await db.execute(
+        "INSERT INTO common_audit_log (table_name, operation, entity_id, old_values, new_values, actor, source) "
+        "VALUES (?, 'UPDATE', ?, ?, ?, ?, 'engine.transition_task')",
+        [
+            "ops_tasks",
+            task_id,
+            json.dumps({"status": old_status}),
+            json.dumps({"status": new_status, **({"notes": update_data["notes"]} if update_data.get("notes") else {})}),
+            actor,
+        ],
+    )
+
+    # ── Undo log (for reversible transitions) ──
+    reverse_map = {"done": "next", "in_progress": "next", "deferred": "next", "waiting_on": "next", "dismissed": "inbox"}
+    if new_status in reverse_map:
+        await db.execute(
+            "INSERT INTO common_undo_log (operation, table_name, entity_id, restore_data, actor) "
+            "VALUES ('UPDATE', 'ops_tasks', ?, ?, ?)",
+            [
+                task_id,
+                json.dumps({"status": old_status}),
+                actor,
+            ],
+        )
+
     await db.commit()
     return {"task_id": task_id, "new_status": new_status}
 
@@ -394,9 +422,10 @@ def what_now(member_id: str, snapshot: DBSnapshot) -> WhatNowResult:
 
 # ─── Snapshot Loader ───
 
-async def load_snapshot(db, member_id: str) -> DBSnapshot:
+async def load_snapshot(db, member_id: str, now: datetime | None = None) -> DBSnapshot:
     """Load all data needed for whatNow() in one batch."""
-    today = date.today()
+    now = now or now_et()
+    today = now.date() if isinstance(now, datetime) else now
 
     # Tasks
     tasks_rows = await db.execute_fetchall(
@@ -443,4 +472,5 @@ async def load_snapshot(db, member_id: str) -> DBSnapshot:
         members=members,
         streaks=streaks,
         calendar_events=calendar_events,
+        now=now,
     )

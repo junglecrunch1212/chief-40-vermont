@@ -2,7 +2,7 @@
 
 import logging
 import random
-from datetime import date
+from datetime import date, datetime
 
 from pib.tz import now_et
 
@@ -127,7 +127,7 @@ async def update_streak(db, member_id: str, completion_date: date) -> dict:
 
 # ─── Task Completion with Rewards ───
 
-async def get_completion_stats(db, member_id: str, task_id: str | None = None) -> dict:
+async def get_completion_stats(db, member_id: str, task_id: str | None = None, now: datetime | None = None) -> dict:
     """Get stats needed for reward message interpolation."""
     row = await db.execute_fetchone(
         "SELECT completions_today FROM pib_energy_states "
@@ -158,7 +158,6 @@ async def get_completion_stats(db, member_id: str, task_id: str | None = None) -
         )
         if task_row and task_row["created_at"]:
             try:
-                from datetime import datetime
                 created = datetime.fromisoformat(task_row["created_at"].replace("Z", "+00:00"))
                 days_old = (now_et() - created.astimezone(now_et().tzinfo)).days
             except (ValueError, TypeError):
@@ -174,7 +173,7 @@ async def get_completion_stats(db, member_id: str, task_id: str | None = None) -
     if clear_row and clear_row["last_clear"]:
         try:
             last_clear = date.fromisoformat(clear_row["last_clear"])
-            days_since_all_clear = (date.today() - last_clear).days
+            days_since_all_clear = (now_et().date() - last_clear).days
         except (ValueError, TypeError):
             pass
 
@@ -187,7 +186,7 @@ async def get_completion_stats(db, member_id: str, task_id: str | None = None) -
     }
 
 
-async def complete_task_with_reward(db, task_id: str, member_id: str, actor: str) -> dict:
+async def complete_task_with_reward(db, task_id: str, member_id: str, actor: str, now: datetime | None = None) -> dict:
     """Complete a task, update streak, select reward, log everything."""
     # 1. Complete the task using state machine (not raw SQL bypass)
     from pib.engine import transition_task
@@ -203,7 +202,7 @@ async def complete_task_with_reward(db, task_id: str, member_id: str, actor: str
     )
 
     # 3. Update streak
-    streak = await update_streak(db, member_id, date.today())
+    streak = await update_streak(db, member_id, now_et().date())
 
     # 4. Select reward (age-aware for child-appropriate messages)
     stats = await get_completion_stats(db, member_id, task_id=task_id)

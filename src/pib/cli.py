@@ -60,7 +60,7 @@ ADMIN_COMMANDS = {"bootstrap", "backup", "migrate"}
 READ_COMMANDS = {
     "what-now", "calendar-query", "custody", "budget", "search",
     "morning-digest", "health", "streak", "upcoming", "scoreboard-data",
-    "member-settings-get", "bootstrap-verify",
+    "member-settings-get", "bootstrap-verify", "context",
     # Channel commands (reads)
     "channel-list", "channel-status", "channel-onboarding", "channel-test",
     "channel-send-enum", "channel-member-list",
@@ -1140,6 +1140,17 @@ async def cmd_bootstrap_verify(db, args: dict, agent_id: str) -> dict:
     }
 
 
+async def cmd_context(db, args: dict, agent_id: str) -> dict:
+    """Assemble LLM context for a member, filtered by calling agent's permissions."""
+    from pib.context import assemble_context
+
+    member_id = args.get("member_id", "m-james")
+    message = args.get("message", "")
+
+    prompt = await assemble_context(db, member_id, message, agent_id=agent_id)
+    return {"prompt": prompt}
+
+
 async def cmd_sensor_ingest(db, args: dict, agent_id: str) -> dict:
     """Ingest sensor reading from bridge.
 
@@ -1239,6 +1250,7 @@ COMMAND_REGISTRY: dict[str, tuple[Any, str]] = {
     "member-settings-set":  (cmd_member_settings_set,   "write"),
     "bootstrap-verify":     (cmd_bootstrap_verify,      "read"),
     "sensor-ingest":        (cmd_sensor_ingest,         "write"),
+    "context":              (cmd_context,               "read"),
 }
 
 # Merge channel commands into registry

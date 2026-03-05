@@ -30,8 +30,10 @@ import json
 import logging
 from typing import Any
 
+from pib.adapters.dispatcher import send_message
 from pib.channels import ChannelRegistry
 from pib.db import audit_log, next_id
+from pib.ingest import OutboundMessage
 from pib.tz import now_et
 
 log = logging.getLogger(__name__)
@@ -185,31 +187,66 @@ async def _dispatch_message(
     reply_to: str | None,
     metadata: dict | None,
 ) -> str:
-    """Dispatch message via adapter (stub for now).
+    """Dispatch message via adapter and record result.
     
-    Real implementation will:
-    1. Get adapter from registry
-    2. Call adapter.send(message, ...)
-    3. Record in ops_comms with status='sent'
+    1. Resolve channel to adapter via dispatcher
+    2. Call dispatcher.send_message()
+    3. Record in ops_comms with actual result status
     4. Return message ID
-    
-    For now, we just log the send as a comm entry.
     """
     message_id = await next_id(db, "msg")
     now = now_et().strftime("%Y-%m-%dT%H:%M:%SZ")
     
-    # TODO: Call actual adapter
-    adapter = registry.get_adapter(channel_id)
-    if adapter:
-        # await adapter.send(message, member_id=member_id, subject=subject, ...)
-        log.info(f"Would dispatch via adapter {channel_id}: {message[:50]}...")
+    # Resolve "to" address for the adapter
+    to_addr = None
+    if member_id:
+        try:
+            row = await db.execute_fetchone(
+                "SELECT phone, email, imessage_handle FROM common_members WHERE id = ?",
+                [member_id],
+            )
+            if row:
+                m = dict(row)
+                channel = registry.get(channel_id)
+                ch_type = channel.adapter if channel else channel_id
+                if ch_type in ("imessage", "bluebubbles"):
+                    to_addr = m.get("imessage_handle") or m.get("phone")
+                elif ch_type in ("email", "gmail"):
+                    to_addr = m.get("email")
+                else:
+                    to_addr = m.get("phone") or m.get("email")
+        except Exception:
+            pass
     
-    # Record as sent comm
+    # Build outbound message and dispatch
+    delivery_status = "sent"
+    delivery_error = None
+    try:
+        outbound = OutboundMessage(
+            channel=channel_id,
+            to=to_addr or member_id or channel_id,
+            content=message,
+            member_id=member_id,
+        )
+        if subject:
+            outbound.metadata = {"subject": subject}
+        result = await send_message(outbound)
+        if not result.get("ok", False):
+            delivery_status = "failed"
+            delivery_error = result.get("error", "Unknown delivery error")
+            log.error(f"Delivery failed via {channel_id}: {delivery_error}")
+    except Exception as e:
+        delivery_status = "failed"
+        delivery_error = str(e)
+        log.exception(f"Delivery exception via {channel_id}")
+    
+    # Record comm with actual delivery status
+    outcome = delivery_status
     await db.execute(
         """INSERT INTO ops_comms
         (id, date, channel, direction, member_id, subject, summary, body_snippet,
          draft_status, outcome, needs_response, visibility, created_by, created_at)
-        VALUES (?, ?, ?, 'outbound', ?, ?, ?, ?, 'sent', 'sent', 0, 'sent', 'pib_agent', ?)""",
+        VALUES (?, ?, ?, 'outbound', ?, ?, ?, ?, ?, ?, 0, 'sent', 'pib_agent', ?)""",
         [
             message_id,
             now[:10],
@@ -218,14 +255,19 @@ async def _dispatch_message(
             subject or f"Outbound via {channel_id}",
             message[:200],
             message,
+            delivery_status,
+            outcome,
             now,
         ],
     )
     await db.commit()
     await audit_log(
         db, "ops_comms", "INSERT", message_id, actor="pib_agent",
-        new_values=json.dumps({"status": "sent", "channel": channel_id}),
+        new_values=json.dumps({"status": delivery_status, "channel": channel_id, "error": delivery_error}),
     )
+    
+    if delivery_status == "failed":
+        raise RuntimeError(f"Delivery failed: {delivery_error}")
     
     return message_id
 

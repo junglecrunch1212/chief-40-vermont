@@ -4,7 +4,7 @@
 >
 > **📚 Doc Hierarchy:** See [`MAC_MINI_WALKTHROUGH.md`](MAC_MINI_WALKTHROUGH.md) for the canonical Brain Mac Mini setup. This guide configures James's and Laura's personal Mac Minis as Apple bridge nodes that push sensor data to the central CoS Mac Mini running OpenClaw/PIB. The Brain uses the multi-agent structure defined in `config/openclaw-agents.yaml`.
 >
-> **📁 Standard Ports:** CoS API = `3141`, Console = `3333`, BlueBubbles = `1234`
+> **📁 Standard Ports:** Console API = `3333`, Console = `3333`, BlueBubbles = `1234`
 
 ---
 
@@ -58,7 +58,7 @@
 - **Ports:**
   | Port | Host | Purpose |
   |------|------|---------|
-  | 3141 | CoS Mini | Sensor ingest + task capture API |
+  | 3333 | CoS Mini | Console dashboard + API (sensor ingest, task capture, webhooks) |
   | 1234 | James/Laura | BlueBubbles server (default) |
   | 8581 | James | Homebridge UI |
   | 51826 | James | Homebridge HAP (HomeKit) |
@@ -961,7 +961,7 @@ const server = http.createServer((req, res) => {
 
       const options = {
         hostname: COS_HOST,
-        port: 3141,
+        port: 3333,
         path: '/api/sensors/ingest',
         method: 'POST',
         headers: {
@@ -1097,15 +1097,15 @@ Update the queue flush script to include `-H "Authorization: Bearer ${PIB_SENSOR
 # Allow sensor ingest from LAN only
 # In System Settings → Network → Firewall → Options:
 # - Enable Firewall
-# - Allow incoming connections for: Node.js (port 3141)
+# - Allow incoming connections for: Node.js (port 3333)
 ```
 
 Or via `pf`:
 
 ```bash
 # /etc/pf.anchors/pib
-pass in on en0 proto tcp from 192.168.1.0/24 to any port 3141
-block in on en0 proto tcp from any to any port 3141
+pass in on en0 proto tcp from 192.168.1.0/24 to any port 3333
+block in on en0 proto tcp from any to any port 3333
 ```
 
 #### James's Mini
@@ -1314,7 +1314,7 @@ sudo homebridge-config-ui-x service start
 ping -c 3 $COS_HOST
 
 # Port check
-nc -zv $COS_HOST 3141
+nc -zv $COS_HOST 3333
 
 # Health endpoint
 curl -v http://$COS_HOST:3333/health

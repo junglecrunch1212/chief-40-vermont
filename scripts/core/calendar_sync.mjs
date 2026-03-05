@@ -15,7 +15,7 @@
  *   PIB_CALLER_AGENT     (set automatically when called by OpenClaw)
  */
 
-import { execSync } from "node:child_process";
+import { execSync, execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { parseArgs } from "node:util";
 
@@ -67,8 +67,8 @@ toDate.setDate(toDate.getDate() + 1);
 
 const fmt = (d) => d.toISOString().split("T")[0];
 
-function run(cmd, opts = {}) {
-  return execSync(cmd, {
+function run(file, args, opts = {}) {
+  return execFileSync(file, args, {
     encoding: "utf-8",
     timeout: 120_000,
     env: { ...process.env, PIB_CALLER_AGENT: CALLER },
@@ -94,21 +94,24 @@ try {
   }
 
   // Step 1: Fetch events from Google Calendar via gog CLI
-  const calFlag = args["cal-id"] ? `"${args["cal-id"]}"` : "--all";
-  const gogCmd = `gog calendar events ${calFlag} --from ${fmt(fromDate)} --to ${fmt(toDate)} --json`;
+  const gogArgs = ["calendar", "events"];
+  if (args["cal-id"]) {
+    gogArgs.push(args["cal-id"]);
+  } else {
+    gogArgs.push("--all");
+  }
+  gogArgs.push("--from", fmt(fromDate), "--to", fmt(toDate), "--json");
   let eventsRaw;
   try {
-    eventsRaw = run(gogCmd);
+    eventsRaw = run("gog", gogArgs);
   } catch (e) {
     throw new Error(`gog calendar fetch failed: ${e.message}`);
   }
 
   // Step 2: Ingest into PIB database
-  const escaped = eventsRaw.replace(/'/g, "'\\''");
-  const ingestCmd = `python -m pib.cli calendar-ingest "${DB_PATH}" --json '${escaped}'`;
   let ingestRaw;
   try {
-    ingestRaw = run(ingestCmd);
+    ingestRaw = run("python", ["-m", "pib.cli", "calendar-ingest", DB_PATH, "--json", eventsRaw]);
   } catch (e) {
     throw new Error(`calendar-ingest failed: ${e.message}`);
   }

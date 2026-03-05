@@ -10,7 +10,7 @@
 ✅ **PASS** — `PIB_HOME=/opt/pib/` used consistently across bootstrap.sh, scripts/core/*.mjs, docs  
 ✅ **PASS** — `PIB_DB_PATH=/opt/pib/data/pib.db` canonical in agent configs and scripts  
 ✅ **PASS** — Console port 3333 used consistently across all references  
-✅ **PASS** — CoS API port 3141 used consistently in PERSONAL_MINI_SETUP.md and build spec  
+✅ **PASS** — All services consolidated on port 3333 (Console/Express). Port 3141 removed.
 ✅ **PASS** — Venv `/opt/pib/venv/` referenced in BOOTSTRAP_INSTRUCTIONS.md  
 ✅ **PASS** — OpenClaw workspaces use `~/.openclaw/workspace-{agent}/` pattern in openclaw-agents.yaml and bootstrap.sh  
 
@@ -77,7 +77,7 @@ These are planned/future scripts described in a task plan, so this is WARN not F
 
 ## 6. Port Consistency
 
-✅ **PASS** — `:3141` used correctly as CoS API in all references  
+✅ **PASS** — Port 3141 references removed; all traffic routes through :3333
 ✅ **PASS** — `:3333` used correctly as Console dashboard in all references  
 ✅ **PASS** — `:1234` used correctly as BlueBubbles default in all references  
 ✅ **PASS** — `:8788` does NOT appear anywhere outside archive — clean  

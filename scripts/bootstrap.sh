@@ -36,6 +36,14 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+run_cmd() {
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "[DRY RUN] $*"
+  else
+    "$@"
+  fi
+}
+
 if [[ "$DRY_RUN" -eq 1 ]]; then
   echo "=== DRY RUN — no changes will be made ==="
 fi
@@ -66,28 +74,30 @@ preflight
 # ─── 1. Directory structure ───
 echo ""
 echo "1. Creating directory structure..."
-sudo mkdir -p "$PIB_HOME"/{data,logs,config,data/backups}
-sudo chown -R "$(whoami)" "$PIB_HOME"
-chmod 700 "$PIB_HOME" "$PIB_HOME/config" || true
-chmod 755 "$PIB_HOME/data" "$PIB_HOME/logs" || true
+run_cmd sudo mkdir -p "$PIB_HOME"/{data,logs,config,data/backups}
+run_cmd sudo chown -R "$(whoami)" "$PIB_HOME"
+run_cmd chmod 700 "$PIB_HOME" "$PIB_HOME/config" || true
+run_cmd chmod 755 "$PIB_HOME/data" "$PIB_HOME/logs" || true
 echo "   Done: $PIB_HOME/{data,logs,config,data/backups}"
 
 # ─── 2. Python venv ───
 echo ""
 echo "2. Setting up Python virtual environment..."
 if [ ! -d "$PIB_HOME/venv" ]; then
-    python3 -m venv "$PIB_HOME/venv"
+    run_cmd python3 -m venv "$PIB_HOME/venv"
     echo "   Created venv at $PIB_HOME/venv"
 else
     echo "   Venv already exists"
 fi
-source "$PIB_HOME/venv/bin/activate"
+if [[ "$DRY_RUN" -eq 0 ]]; then
+  source "$PIB_HOME/venv/bin/activate"
+fi
 
 # ─── 3. Install Python deps ───
 echo ""
 echo "3. Installing Python dependencies..."
-pip install --upgrade pip
-pip install -e "$PIB_REPO[dev]"
+run_cmd pip install --upgrade pip
+run_cmd pip install -e "$PIB_REPO[dev]"
 echo "   Done"
 
 # ─── 4. .env file ───
@@ -95,12 +105,12 @@ echo ""
 echo "4. Checking .env file..."
 ENV_FILE="$PIB_HOME/config/.env"
 if [ ! -f "$ENV_FILE" ]; then
-    cp "$PIB_REPO/config/.env.example" "$ENV_FILE"
-    chmod 600 "$ENV_FILE"
+    run_cmd cp "$PIB_REPO/config/.env.example" "$ENV_FILE"
+    run_cmd chmod 600 "$ENV_FILE"
     echo "   Created $ENV_FILE from template"
     echo "   >>> IMPORTANT: Edit $ENV_FILE and fill in your API keys <<<"
 else
-    chmod 600 "$ENV_FILE" || true
+    run_cmd chmod 600 "$ENV_FILE" || true
     echo "   .env already exists at $ENV_FILE"
 fi
 
@@ -108,8 +118,8 @@ fi
 echo ""
 echo "5. Seeding database..."
 DB_PATH="$PIB_HOME/data/pib.db"
-PIB_DB_PATH="$DB_PATH" python "$PIB_REPO/scripts/seed_data.py" "$DB_PATH"
-chmod 600 "$DB_PATH" || true
+run_cmd env PIB_DB_PATH="$DB_PATH" python "$PIB_REPO/scripts/seed_data.py" "$DB_PATH"
+run_cmd chmod 600 "$DB_PATH" || true
 echo "   Database at $DB_PATH"
 
 # ─── 6. Build frontend (if node is available) ───
@@ -135,7 +145,7 @@ echo "7. Installing launchd service..."
 PLIST_SRC="$PIB_REPO/config/com.pib.runtime.plist"
 PLIST_DST="$HOME/Library/LaunchAgents/com.pib.runtime.plist"
 if [ -f "$PLIST_SRC" ]; then
-    cp "$PLIST_SRC" "$PLIST_DST"
+    run_cmd cp "$PLIST_SRC" "$PLIST_DST"
     echo "   Installed plist to $PLIST_DST"
     echo "   To start: launchctl load $PLIST_DST"
     echo "   To stop:  launchctl unload $PLIST_DST"
@@ -148,9 +158,9 @@ echo ""
 echo "7b. Copying workspace templates..."
 OPENCLAW_BASE="$HOME/.openclaw"
 for agent in cos coach dev; do
-  mkdir -p "$OPENCLAW_BASE/workspace-$agent"
+  run_cmd mkdir -p "$OPENCLAW_BASE/workspace-$agent"
   if ls "$PIB_REPO/workspace-template/$agent/"*.md 1>/dev/null 2>&1; then
-    cp "$PIB_REPO/workspace-template/$agent/"*.md "$OPENCLAW_BASE/workspace-$agent/"
+    run_cmd cp "$PIB_REPO/workspace-template/$agent/"*.md "$OPENCLAW_BASE/workspace-$agent/"
     echo "   Copied $agent templates"
   else
     echo "   No .md files for $agent (skipped)"
@@ -162,7 +172,7 @@ echo ""
 echo "7c. Installing console dependencies..."
 if command -v node >/dev/null && [[ "$SKIP_FRONTEND" -eq 0 ]]; then
   if [ -d "$PIB_REPO/console" ]; then
-    cd "$PIB_REPO/console" && npm install
+    cd "$PIB_REPO/console" && run_cmd npm install
     echo "   Console dependencies installed"
   else
     echo "   No console/ directory found (skipped)"
@@ -174,8 +184,11 @@ fi
 # ─── 8. Verification ───
 echo ""
 echo "8. Verification..."
-python -m pib.cli health "$DB_PATH" --json && echo "   Health check: OK" || { echo "   Health check: FAILED"; exit 1; }
-python -c "
+if [[ "$DRY_RUN" -eq 1 ]]; then
+  echo "[DRY RUN] Would run health check, DB verification, and readiness probe"
+else
+  python -m pib.cli health "$DB_PATH" --json && echo "   Health check: OK" || { echo "   Health check: FAILED"; exit 1; }
+  python -c "
 import sqlite3
 conn = sqlite3.connect('$DB_PATH')
 members = conn.execute('SELECT COUNT(*) FROM common_members WHERE active=1').fetchone()[0]
@@ -184,10 +197,10 @@ print(f'   DB check: {tables} tables, {members} active members')
 conn.close()
 "
 
-# Strict readiness probe in prod mode
-if [[ "$MODE" == "prod" ]]; then
-  echo "   Running readiness probe (strict)..."
-  PIB_DB_PATH="$DB_PATH" PIB_ENV=production PIB_STRICT_STARTUP=1 python - <<'PY'
+  # Strict readiness probe in prod mode
+  if [[ "$MODE" == "prod" ]]; then
+    echo "   Running readiness probe (strict)..."
+    PIB_DB_PATH="$DB_PATH" PIB_ENV=production PIB_STRICT_STARTUP=1 python - <<'PY'
 import asyncio
 from pib.db import get_connection
 from pib.readiness import evaluate_readiness, validate_strict_startup
@@ -206,12 +219,17 @@ async def main():
 
 asyncio.run(main())
 PY
+  fi
 fi
 
 # ─── 9. CLI smoke test ───
 echo ""
 echo "9. CLI smoke test..."
-python -m pib.cli health "$DB_PATH" 2>/dev/null && echo "   CLI health check: OK" || echo "   CLI health check: skipped (cli.py not yet wired)"
+if [[ "$DRY_RUN" -eq 1 ]]; then
+  echo "[DRY RUN] Would run CLI smoke test"
+else
+  python -m pib.cli health "$DB_PATH" 2>/dev/null && echo "   CLI health check: OK" || echo "   CLI health check: skipped (cli.py not yet wired)"
+fi
 
 # ─── 10. Verify governance + FTS5 triggers ───
 echo ""
@@ -221,8 +239,12 @@ if [ -f "$PIB_REPO/config/governance.yaml" ]; then
 else
   echo "   governance.yaml: MISSING"
 fi
-TRIGGER_COUNT=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name LIKE '%fts%';" 2>/dev/null || echo "0")
-echo "   FTS5 triggers: $TRIGGER_COUNT found"
+if [[ "$DRY_RUN" -eq 1 ]]; then
+  echo "[DRY RUN] Would check FTS5 triggers in $DB_PATH"
+else
+  TRIGGER_COUNT=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name LIKE '%fts%';" 2>/dev/null || echo "0")
+  echo "   FTS5 triggers: $TRIGGER_COUNT found"
+fi
 
 # ─── Summary ───
 echo ""

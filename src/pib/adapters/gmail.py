@@ -119,8 +119,11 @@ class GmailAdapter:
                 urgency = self._check_urgency(subject, from_addr, snippet, keywords)
 
                 # Determine batch window
-                from pib.comms import assign_batch_window
-                batch_window, batch_date = assign_batch_window()
+                from pib.comms import assign_batch_window, assign_batch_date, get_batch_config
+                batch_config = await get_batch_config(db)
+                comm_dt = datetime.now()
+                batch_window = assign_batch_window(comm_dt, batch_config)
+                batch_date = assign_batch_date(comm_dt, batch_window, batch_config)
 
                 # Write to ops_comms
                 from pib.db import next_id

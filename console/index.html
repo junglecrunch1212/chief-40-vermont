@@ -132,7 +132,7 @@ const NAV = [
   { id:'people', icon:'users', label:'People' },
   { id:'settings', icon:'settings', label:'Settings' },
 ];
-const HIDDEN_FOR_CHILD = ['tasks','people','settings','captures'];
+const HIDDEN_FOR_CHILD = ['tasks', 'people', 'settings', 'captures', 'comms'];
 const DOMAIN_BADGE = {household:'badge-lav',health:'badge-teal',finance:'badge-warn',family:'badge-pink',work:'badge-info',admin:'badge-grn',capture:'badge-warn'};
 const ADAPTER_BADGE = {email:'badge-pink',imessage:'badge-lav',sms:'badge-teal',whatsapp:'badge-grn',voice:'badge-warn',webhook:'badge-info',manual:'badge-err'};
 const SETTINGS_TABS = ['health','costs','models','sources','phases','config','budget','household','permissions','coaching','gates','channels','memory','captures'];
@@ -1079,7 +1079,8 @@ async function renderComms() {
 // ── CHAT (with SSE streaming) ──
 function renderChat() {
   const m = document.getElementById('main');
-  const chips = ['today','now','grocery list','schedule','status','capture:','recipe:','diff','help'];
+  const isChildChat = authenticatedMember?.role === 'child' || MEMBERS.find(m=>m.id===currentActor)?.viewMode === 'child';
+  const chips = isChildChat ? ['today','help','schedule'] : ['today','now','grocery list','schedule','status','capture:','recipe:','diff','help'];
   function draw() {
     m.innerHTML = `<div class="fi" style="display:flex;flex-direction:column;height:calc(100vh - 56px);max-width:700px;margin:0 auto">
       <h1 class="page-title" style="flex-shrink:0">Chat with Poopsy</h1>
@@ -1199,7 +1200,7 @@ async function renderScoreboard() {
       
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px">
         <div class="card-flat">
-          <div class="section-label">Neuroprosthetic Layers (ADHD)</div>
+          <div class="section-label">${authenticatedMember?.role === 'child' ? 'My Score' : 'Neuroprosthetic Layers (ADHD)'}</div>
           <div style="text-align:center;margin-bottom:16px"><div style="font-size:36px;font-weight:700;color:var(--pink);font-family:var(--head)">${data.overallScore??0}</div><div style="font-size:12px;color:var(--tx3)">/ 100 overall</div></div>
           ${layers.map(l=>`<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
             <span style="font-size:12px;color:var(--tx2);min-width:90px">${esc(l.name)}</span>
@@ -1285,7 +1286,7 @@ async function renderTVScoreboard() {
         </div>
         
         <div style="background:rgba(232,160,191,0.05);border:2px solid rgba(232,160,191,0.3);border-radius:24px;padding:40px">
-          <div class="big" style="margin-bottom:30px;text-align:center">ADHD Neuroprosthetic Layers</div>
+          <div class="big" style="margin-bottom:30px;text-align:center">${authenticatedMember?.role === 'child' ? 'My Score' : 'ADHD Neuroprosthetic Layers'}</div>
           ${layers.map(l=>`<div style="display:flex;align-items:center;gap:20px;margin-bottom:20px">
             <span class="med" style="min-width:200px">${esc(l.name)}</span>
             <div style="flex:1;height:20px;background:rgba(232,160,191,0.1);border-radius:10px;overflow:hidden">

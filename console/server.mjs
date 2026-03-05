@@ -585,7 +585,7 @@ app.get("/api/today-stream", requireMember, (req, res) => {
 });
 
 // --- Tasks ---
-app.get("/api/tasks", optionalMember, (req, res) => {
+app.get("/api/tasks", requireMember, (req, res) => {
   const d = getDB();
   const filter = req.query.filter || "all";
   const assignee = req.query.assignee || req.memberId;
@@ -709,7 +709,7 @@ app.get("/api/lists/:listName", (_req, res) => {
 });
 
 // --- Scoreboard ---
-app.get("/api/scoreboard", optionalMember, (req, res) => {
+app.get("/api/scoreboard", requireTailscale, (req, res) => {
   const memberId = req.query.member || req.memberId;
   
   // If member-specific view requested (e.g., Charlie's scoreboard)
@@ -775,7 +775,7 @@ app.get("/api/budget", (_req, res) => {
 });
 
 // --- Financial Summary ---
-app.get("/api/financial/summary", requireMember, (req, res) => {
+app.get("/api/financial/summary", requireParent, (req, res) => {
   const d = getDB();
   const today = todayET();
   const firstOfMonth = today.slice(0, 8) + "01";
@@ -916,6 +916,9 @@ app.post("/api/tasks/:id/complete", requireMember, (req, res) => {
   if (!task) {
     return res.status(404).json({ error: "Task not found" });
   }
+  if (task.assignee !== req.authMemberId && task.assignee !== req.memberId) {
+    return res.status(403).json({ error: "Can only complete your own tasks" });
+  }
   
   // Open writable DB for mutations
   const wdb = getWriteDB();
@@ -1000,6 +1003,12 @@ app.post("/api/tasks/:id/complete", requireMember, (req, res) => {
 });
 
 app.post("/api/tasks/:id/skip", requireMember, (req, res) => {
+  const d = getDB();
+  const task = d.prepare("SELECT * FROM ops_tasks WHERE id = ?").get(req.params.id);
+  if (!task) return res.status(404).json({ error: "Task not found" });
+  if (task.assignee !== req.authMemberId && task.assignee !== req.memberId) {
+    return res.status(403).json({ error: "Can only skip your own tasks" });
+  }
   const args = { task_id: req.params.id };
   if (req.body.reschedule_date) args.scheduled_date = req.body.reschedule_date;
   const result = runCLI("task-snooze", args, req.memberId);
@@ -1033,8 +1042,12 @@ app.post("/api/lists/:listName/items/:id/toggle", requireMember, guardedWrite("l
 }));
 
 app.post("/api/chat/send", requireMember, rateLimitMiddleware("web_chat"), (req, res) => {
+  const childMode = req.body.child_mode === true || req.memberRole === 'child';
+  const childPrompt = childMode
+    ? "You are talking to a child (age 6). Keep responses simple, age-appropriate, fun. Never discuss finances, medical details, custody, ADHD, medications, or adult scheduling.\n\n"
+    : "";
   const result = runCLI("capture", {
-    text: req.body.message,
+    text: childPrompt + req.body.message,
     source: "webchat",
   }, req.memberId);
   res.json(result);
@@ -1067,7 +1080,7 @@ app.post("/api/chores/:id/toggle", requireMember, (req, res) => {
 // (reuses /api/health above)
 
 // --- Operating Costs ---
-app.get("/api/costs", (_req, res) => {
+app.get("/api/costs", requireParent, (req, res) => {
   // Computed from pib_config + LLM usage tracking
   const d = getDB();
   const config = d.prepare("SELECT * FROM pib_config WHERE key LIKE 'cost_%'").all();
@@ -1078,7 +1091,7 @@ app.get("/api/costs", (_req, res) => {
 });
 
 // --- AI Models ---
-app.get("/api/config/models", (_req, res) => {
+app.get("/api/config/models", requireParent, (req, res) => {
   const d = getDB();
   const sonnet = d.prepare("SELECT value FROM pib_config WHERE key = 'anthropic_model_sonnet'").get();
   const opus = d.prepare("SELECT value FROM pib_config WHERE key = 'anthropic_model_opus'").get();
@@ -1091,27 +1104,27 @@ app.get("/api/config/models", (_req, res) => {
 });
 
 // --- Sources ---
-app.get("/api/sources", (_req, res) => {
+app.get("/api/sources", requireParent, (req, res) => {
   const d = getDB();
   const sources = d.prepare("SELECT * FROM common_source_classifications WHERE active = 1").all();
   res.json({ sources });
 });
 
 // --- Life Phases ---
-app.get("/api/phases", (_req, res) => {
+app.get("/api/phases", requireParent, (req, res) => {
   const d = getDB();
   const phases = d.prepare("SELECT * FROM common_life_phases ORDER BY start_date").all();
   res.json({ phases });
 });
 
 // --- Config (pib_config) ---
-app.get("/api/config", (_req, res) => {
+app.get("/api/config", requireParent, (req, res) => {
   const d = getDB();
   const rows = d.prepare("SELECT key, value as val, description as desc FROM pib_config ORDER BY key").all();
   res.json({ config: rows });
 });
 
-app.post("/api/config/:key", requireMember, guardedWrite("config_set", (req, res) => {
+app.post("/api/config/:key", requireParent, guardedWrite("config_set", (req, res) => {
   const key = req.params.key;
   if (!/^[a-zA-Z0-9_]+$/.test(key)) {
     return res.status(400).json({ error: "key must be alphanumeric + underscores only" });
@@ -1129,7 +1142,7 @@ app.post("/api/config/:key", requireMember, guardedWrite("config_set", (req, res
 }));
 
 // --- Settings: Permissions (read-only) ---
-app.get("/api/settings/permissions", (_req, res) => {
+app.get("/api/settings/permissions", requireParent, (req, res) => {
   const caps = loadYAML("agent_capabilities.yaml");
   const agents = caps.agents || {};
   const result = Object.entries(agents).map(([id, config]) => ({
@@ -1150,7 +1163,7 @@ app.get("/api/settings/permissions", (_req, res) => {
 });
 
 // --- Settings: Coaching Protocols ---
-app.get("/api/settings/coaching", (_req, res) => {
+app.get("/api/settings/coaching", requireParent, (req, res) => {
   const d = getDB();
   try {
     const protocols = d.prepare("SELECT * FROM pib_coach_protocols ORDER BY name").all();
@@ -1160,7 +1173,7 @@ app.get("/api/settings/coaching", (_req, res) => {
   }
 });
 
-app.post("/api/settings/coaching/:id/toggle", requireMember, guardedWrite("coaching_toggle", (req, res) => {
+app.post("/api/settings/coaching/:id/toggle", requireParent, guardedWrite("coaching_toggle", (req, res) => {
   const wdb = getWriteDB();
   const proto = wdb.prepare("SELECT active FROM pib_coach_protocols WHERE id = ?").get(req.params.id);
   if (!proto) { wdb.close(); return res.status(404).json({ error: "Protocol not found" }); }
@@ -1171,7 +1184,7 @@ app.post("/api/settings/coaching/:id/toggle", requireMember, guardedWrite("coach
 }));
 
 // --- Settings: Governance Gates (read-only) ---
-app.get("/api/settings/gates", (_req, res) => {
+app.get("/api/settings/gates", requireParent, (req, res) => {
   const gov = loadYAML("governance.yaml");
   res.json({
     action_gates: gov.action_gates || {},
@@ -1181,13 +1194,18 @@ app.get("/api/settings/gates", (_req, res) => {
 });
 
 // --- Settings: Household (member management) ---
-app.get("/api/settings/household", (_req, res) => {
+app.get("/api/settings/household", requireParent, (req, res) => {
   const d = getDB();
   const members = d.prepare("SELECT * FROM common_members ORDER BY role, display_name").all();
-  res.json({ members });
+  const filtered = members.map(m => {
+    if (m.id === req.memberId) return m;
+    const { email, phone, tailscale_email, medication_config, energy_markers, ...safe } = m;
+    return safe;
+  });
+  res.json({ members: filtered });
 });
 
-app.post("/api/settings/household/members", requireMember, guardedWrite("member_add", (req, res) => {
+app.post("/api/settings/household/members", requireParent, guardedWrite("member_add", (req, res) => {
   const { id, display_name, role } = req.body;
   if (!id || !display_name || !role) {
     return res.status(400).json({ error: "id, display_name, and role are required" });
@@ -1209,7 +1227,7 @@ app.post("/api/settings/household/members", requireMember, guardedWrite("member_
   }
 }));
 
-app.post("/api/settings/household/members/:id/deactivate", requireMember, guardedWrite("member_deactivate", (req, res) => {
+app.post("/api/settings/household/members/:id/deactivate", requireParent, guardedWrite("member_deactivate", (req, res) => {
   const wdb = getWriteDB();
   wdb.prepare("UPDATE common_members SET active = 0 WHERE id = ?").run(req.params.id);
   auditLog(wdb, "member-deactivate", JSON.stringify({ id: req.params.id }), req.memberId);
@@ -1254,7 +1272,7 @@ app.post("/api/member-settings/:key", requireMember, (req, res) => {
 // CHORES (Charlie-specific)
 // ═══════════════════════════════════════════════════════════
 
-app.get("/api/chores", optionalMember, (req, res) => {
+app.get("/api/chores", requireMember, (req, res) => {
   const d = getDB();
   const memberId = req.query.member || "m-charlie";
   const chores = d.prepare(
@@ -1268,7 +1286,7 @@ app.get("/api/chores", optionalMember, (req, res) => {
 // PEOPLE PAGE — Contacts, Comms, Observations, Autonomy Tiers
 // ═══════════════════════════════════════════════════════════
 
-app.get("/api/people/contacts", requireMember, (req, res) => {
+app.get("/api/people/contacts", requireParent, (req, res) => {
   const d = getDB();
   const today = todayET();
 
@@ -1310,7 +1328,7 @@ app.get("/api/people/contacts", requireMember, (req, res) => {
   res.json({ contacts });
 });
 
-app.get("/api/people/comms", requireMember, (req, res) => {
+app.get("/api/people/comms", requireParent, (req, res) => {
   const d = getDB();
   const limit = parseInt(req.query.limit || "20", 10);
 
@@ -1323,7 +1341,7 @@ app.get("/api/people/comms", requireMember, (req, res) => {
   res.json({ comms });
 });
 
-app.get("/api/people/observations", requireMember, (req, res) => {
+app.get("/api/people/observations", requireParent, (req, res) => {
   const d = getDB();
 
   // Observations = long-term memories with category='observation'
@@ -1344,7 +1362,7 @@ app.get("/api/people/observations", requireMember, (req, res) => {
   res.json({ observations: enriched });
 });
 
-app.get("/api/people/autonomy-tiers", requireMember, (req, res) => {
+app.get("/api/people/autonomy-tiers", requireParent, (req, res) => {
   const gov = loadYAML("governance.yaml");
   const caps = loadYAML("agent_capabilities.yaml");
 
@@ -1401,7 +1419,7 @@ app.get("/api/channels", (_req, res) => {
 });
 
 // --- Single channel detail ---
-app.get("/api/channels/:id", (req, res) => {
+app.get("/api/channels/:id", requireMember, (req, res) => {
   const d = getDB();
   try {
     const channel = d.prepare(`
@@ -1412,6 +1430,14 @@ app.get("/api/channels/:id", (req, res) => {
       WHERE c.id = ?
     `).get(req.params.id);
     if (!channel) return res.status(404).json({ error: "Channel not found" });
+
+    // Access check
+    const access = d.prepare(
+      "SELECT access_level FROM comms_channel_member_access WHERE member_id = ? AND channel_id = ?"
+    ).get(req.memberId, req.params.id);
+    if (!access || access.access_level === 'none') {
+      return res.status(403).json({ error: "No access to this channel" });
+    }
 
     // Get capabilities - table doesn't exist in schema, capabilities are in channel.config_json
     let capabilities = [];
@@ -1776,7 +1802,7 @@ app.post("/api/captures/:id/made-it", requireMember, guardedWrite("capture_made_
 }));
 
 // --- GET /api/settings/captures — Capture settings ---
-app.get("/api/settings/captures", requireMember, (req, res) => {
+app.get("/api/settings/captures", requireParent, (req, res) => {
   const d = getDB();
 
   try {
@@ -1803,7 +1829,7 @@ app.get("/api/settings/captures", requireMember, (req, res) => {
 });
 
 // --- POST /api/settings/captures/adapter/:source — Toggle adapter ---
-app.post("/api/settings/captures/adapter/:source", requireMember, guardedWrite("capture_adapter_toggle", (req, res) => {
+app.post("/api/settings/captures/adapter/:source", requireParent, guardedWrite("capture_adapter_toggle", (req, res) => {
   const wdb = req.writeDB;
   const memberId = req.memberId;
   const source = req.params.source;
@@ -1940,7 +1966,7 @@ app.post("/api/capture/task", rateLimitMiddleware("siri"), (req, res) => {
 });
 
 // --- Sensor Data Query (privacy-fenced) ---
-app.get("/api/sensors", optionalMember, (req, res) => {
+app.get("/api/sensors", requireMember, (req, res) => {
   const d = getDB();
   const memberId = req.memberId;
   const readingType = req.query.type;

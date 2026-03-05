@@ -659,17 +659,15 @@ function seedData(db) {
   console.log("  Member channel access...");
   
   const memberAccess = [
-    // James admin on most
+    // James admin on OWN channels only
     { member_id: 'm-james', channel_id: 'ch-gmail-james', access_level: 'admin', can_approve_drafts: 1, batch_window: 'morning' },
     { member_id: 'm-james', channel_id: 'ch-imessage-james', access_level: 'admin', can_approve_drafts: 1, batch_window: 'evening' },
     { member_id: 'm-james', channel_id: 'ch-sms-james', access_level: 'admin', can_approve_drafts: 1, batch_window: 'evening' },
     { member_id: 'm-james', channel_id: 'ch-voice-james', access_level: 'admin', can_approve_drafts: 1, batch_window: null },
-    { member_id: 'm-james', channel_id: 'ch-outlook-laura', access_level: 'read', can_approve_drafts: 0, batch_window: null },
     
-    // Laura admin on her channels
+    // Laura admin on OWN channels only — zero cross-member grants
     { member_id: 'm-laura', channel_id: 'ch-outlook-laura', access_level: 'admin', can_approve_drafts: 1, batch_window: 'midday' },
-    { member_id: 'm-laura', channel_id: 'ch-gmail-james', access_level: 'read', can_approve_drafts: 0, batch_window: null },
-    { member_id: 'm-laura', channel_id: 'ch-imessage-james', access_level: 'read', can_approve_drafts: 0, batch_window: null },
+    // Charlie gets ZERO channel access rows
   ];
   
   const insertAccess = db.prepare(`

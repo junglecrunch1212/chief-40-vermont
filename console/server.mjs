@@ -334,9 +334,9 @@ function resolveIdentity(req) {
     };
   }
 
-  // Fallback: X-PIB-Member (dev only)
+  // Fallback: X-PIB-Member / view_as / member query param (dev only)
   const devMode = process.env.PIB_ENV === 'dev';
-  const headerMemberId = req.headers["x-pib-member"] || req.query.member;
+  const headerMemberId = req.headers["x-pib-member"] || req.query.member || req.query.view_as;
   if (headerMemberId && devMode) {
     const member = db.prepare(
       "SELECT * FROM common_members WHERE id = ? AND active = 1"
@@ -346,6 +346,20 @@ function resolveIdentity(req) {
         authMember: member, viewMember: member,
         memberId: member.id, authMemberId: member.id,
         role: member.role, source: 'dev-header',
+      };
+    }
+  }
+
+  // Dev mode ultimate fallback: default to first parent (allows demo without any auth)
+  if (devMode) {
+    const fallback = db.prepare(
+      "SELECT * FROM common_members WHERE role = 'parent' AND active = 1 ORDER BY id LIMIT 1"
+    ).get();
+    if (fallback) {
+      return {
+        authMember: fallback, viewMember: fallback,
+        memberId: fallback.id, authMemberId: fallback.id,
+        role: fallback.role, source: 'dev-fallback',
       };
     }
   }

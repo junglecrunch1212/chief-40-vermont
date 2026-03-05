@@ -1,26 +1,62 @@
 # scripts/core/ — OpenClaw Integration Scripts
 
-These `.mjs` scripts are the glue between OpenClaw (L0) and PIB's Python CLI (L1-L2).
-They are created by the OpenClaw agent during bootstrap Phase 7.
+These `.mjs` scripts bridge OpenClaw (L0) and PIB's Python CLI (L1-L2).
 
-## Expected Scripts
+## Environment Variables
 
-| Script | Purpose |
-|--------|---------|
-| `calendar_sync.mjs` | Calls `gog calendar events --json`, pipes to `python -m pib.cli calendar-ingest $PIB_DB_PATH` |
-| `context_assembler.mjs` | Calls `python -m pib.cli context $PIB_DB_PATH --member {id}`, returns system prompt |
-| `what_now.mjs` | Thin wrapper around `python -m pib.cli what-now $PIB_DB_PATH` |
-| `heartbeat_check.mjs` | SQLite health + gog connectivity checks |
+All scripts respect:
 
-## Pattern
+| Var | Default | Description |
+|-----|---------|-------------|
+| `PIB_DB_PATH` | `/opt/pib/data/pib.db` | Path to PIB SQLite database |
+| `PIB_HOME` | `/opt/pib` | PIB home directory |
+| `PIB_CALLER_AGENT` | `openclaw` | Passed to Python CLI for audit trail |
 
-Each script:
-1. Reads config/env for paths and credentials
-2. Calls `gog` CLI or Python CLI via `execSync`/`spawn`
-3. Parses JSON output
-4. Returns structured result to OpenClaw
+## Scripts
+
+### `calendar_sync.mjs`
+
+Fetches Google Calendar events via `gog` CLI and ingests them into PIB.
+
+```bash
+node scripts/core/calendar_sync.mjs --incremental --json   # last 24h
+node scripts/core/calendar_sync.mjs --full --json           # last 90 days
+node scripts/core/calendar_sync.mjs --cal-id "abc@group.calendar.google.com" --json
+```
+
+### `context_assembler.mjs`
+
+Assembles the full LLM system prompt with calendar, tasks, and financial context.
+
+```bash
+node scripts/core/context_assembler.mjs --member 1 --json
+node scripts/core/context_assembler.mjs --member 1 --message "What's on today?" --json
+```
+
+### `what_now.mjs`
+
+Returns the single highest-priority next task for a member.
+
+```bash
+node scripts/core/what_now.mjs --member 1 --json
+```
+
+### `heartbeat_check.mjs`
+
+Runs system health checks: DB exists, CLI health, gog auth, disk space, backup age.
+
+```bash
+node scripts/core/heartbeat_check.mjs --json
+```
+
+Returns `{status: "ok"|"warn"|"error", checks: [...]}`.
+
+## Common Flags
+
+All scripts support:
+- `--json` — Structured JSON output
+- `--help` — Usage information
 
 ## Reference
 - `docs/openclaw-integration.md` §4.1 — Script architecture
-- `docs/openclaw-integration.md` §5 — Workspace file generation
-- `src/pib/cli.py` — CLI command reference (26 commands, 6-layer permission boundary)
+- `src/pib/cli.py` — CLI command reference

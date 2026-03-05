@@ -11,7 +11,8 @@ async def test_readiness_reports_missing_required(db):
         "ANTHROPIC_API_KEY",
         "TWILIO_AUTH_TOKEN",
         "TWILIO_PHONE_NUMBER",
-        "BLUEBUBBLES_SECRET",
+        "BLUEBUBBLES_JAMES_SECRET",
+        "BLUEBUBBLES_LAURA_SECRET",
         "SIRI_BEARER_TOKEN",
         "GOOGLE_SA_KEY_PATH",
     ]:
@@ -39,7 +40,7 @@ async def test_openclaw_mode_skips_google_check(db, monkeypatch):
     """In openclaw mode, GOOGLE_SA_KEY_PATH should not be required."""
     monkeypatch.setenv("PIB_RUNTIME_MODE", "openclaw")
     for key in ["ANTHROPIC_API_KEY", "TWILIO_AUTH_TOKEN", "TWILIO_PHONE_NUMBER",
-                "BLUEBUBBLES_SECRET", "SIRI_BEARER_TOKEN"]:
+                "BLUEBUBBLES_JAMES_SECRET", "BLUEBUBBLES_LAURA_SECRET", "SIRI_BEARER_TOKEN"]:
         monkeypatch.setenv(key, "test-value")
     monkeypatch.delenv("GOOGLE_SA_KEY_PATH", raising=False)
 

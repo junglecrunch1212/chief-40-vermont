@@ -1,3 +1,5 @@
+> **⚠️ ARCHIVED (2026-03-05):** This document has been superseded. See [`MAC_MINI_WALKTHROUGH.md`](../MAC_MINI_WALKTHROUGH.md) for the canonical bootstrap guide. Unique content (port allocation table, Cloudflare tunnel instructions) has been merged into the Walkthrough.
+
 # Mac Mini Bootstrap Plan — OpenClaw → chief-40-vermont Deployment
 
 **Goal:** A fully prepared Mac Mini running OpenClaw, ready to deploy chief-40-vermont (c40v) with the integration spec. When you tell OpenClaw "deploy c40v," it has everything it needs — credentials, tools, ports, permissions — to succeed without asking you to fix things mid-build.

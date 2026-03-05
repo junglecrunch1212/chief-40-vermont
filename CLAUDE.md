@@ -10,11 +10,36 @@ ADHD-optimized household Chief-of-Staff system for the Stice-Sclafani family. Ru
 - `src/pib/` — Python source modules (domain logic + CLI).
 - `scripts/core/` — Node.js operational scripts (calendar, context assembly, recurring tasks).
 - `console/` — Express server (server.mjs) + dashboard UI (index.html).
-- `workspace-template/` — OpenClaw workspace template (agents.yaml, cron, tools).
+- `workspace-template/` — Per-agent OpenClaw workspace templates (see Multi-Agent below).
+- `config/agent_capabilities.yaml` — Agent permission boundaries (source of truth).
+- `config/governance.yaml` — Action-level governance gates.
+- `config/openclaw-agents.yaml` — Multi-agent deployment spec.
 - `BOOTSTRAP_INSTRUCTIONS.md` — Setup guide for OpenClaw deployment.
 - `migrations/001_initial_schema.sql` — Full SQLite DDL (35+ tables).
 - `tests/` — pytest test suite.
 - `archive/` — Deprecated legacy server code (reference only, do not import).
+
+## Multi-Agent Architecture
+PIB runs as 3 interactive agents + 2 non-interactive services on one box:
+
+| Agent | ID | Model | Capabilities | Channels |
+|-------|----|-------|-------------|----------|
+| Chief of Staff | pib-cos | claude-sonnet-4-5 | none | iMessage, Signal, webchat |
+| ADHD Coach | pib-coach | claude-sonnet-4-5 | none | iMessage, webchat |
+| DevOps | pib-dev | claude-opus-4-6 | full | webchat only |
+| Scoreboard | pib-scoreboard | none (data-only) | none | HTTP |
+| Proactive | pib-proactive | none (deterministic) | none | cron |
+
+Each interactive agent has its own workspace directory under `workspace-template/`:
+- `workspace-template/cos/` — CoS workspace files (SOUL, AGENTS, IDENTITY, TOOLS, USER, HEARTBEAT, MEMORY)
+- `workspace-template/coach/` — Coach workspace files (privacy-filtered: no financial data)
+- `workspace-template/dev/` — Dev workspace files (full access)
+- `workspace-template/shared/` — Master reference copies of all original files
+
+Privacy filtering per agent:
+- **CoS:** Laura's calendar = busy_only, financial data = household_only
+- **Coach:** Laura's calendar = busy_only, financial data = NONE
+- **Dev:** Full visibility (admin, never user-facing)
 
 ## Architecture
 - **L0 (Infrastructure):** OpenClaw gateway, cron engine, channel auth, `gog` CLI for Google.

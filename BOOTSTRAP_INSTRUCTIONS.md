@@ -1,4 +1,8 @@
-# PIB v5 Bootstrap — Mac Mini Setup Guide
+# PIB v5 Bootstrap — Mac Mini Setup Guide (Quick Reference)
+
+> **📚 Doc Hierarchy:** This is the **condensed quick-reference** for experienced operators doing repeat setups. For the canonical step-by-step guide, see [`MAC_MINI_WALKTHROUGH.md`](MAC_MINI_WALKTHROUGH.md). For bridge Mac Mini setup, see [`PERSONAL_MINI_SETUP.md`](PERSONAL_MINI_SETUP.md).
+>
+> **📁 Standard Paths:** `PIB_HOME=/opt/pib/` · DB `/opt/pib/data/pib.db` · Console `/opt/pib/console/server.mjs` · Venv `/opt/pib/venv/` · Logs `/opt/pib/logs/` · Config `/opt/pib/config/`
 
 **Goal:** A running PIB v5 household CoS on a Mac Mini, powered by OpenClaw as L0 infrastructure.
 
@@ -110,20 +114,21 @@ pytest tests/ -v
 
 ## Phase 3: Workspace Setup (~5 min) [HUMAN]
 
-Copy the pre-built workspace template files into your OpenClaw workspace:
+Copy the pre-built workspace template files into each agent's OpenClaw workspace (multi-agent structure):
 
 ```bash
-# Copy all workspace files
-cp /opt/pib/pib/workspace-template/SOUL.md ~/.openclaw/workspace/SOUL.md
-cp /opt/pib/pib/workspace-template/AGENTS.md ~/.openclaw/workspace/AGENTS.md
-cp /opt/pib/pib/workspace-template/HEARTBEAT.md ~/.openclaw/workspace/HEARTBEAT.md
-cp /opt/pib/pib/workspace-template/USER.md ~/.openclaw/workspace/USER.md
-cp /opt/pib/pib/workspace-template/TOOLS.md ~/.openclaw/workspace/TOOLS.md
-cp /opt/pib/pib/workspace-template/IDENTITY.md ~/.openclaw/workspace/IDENTITY.md
-cp /opt/pib/pib/workspace-template/MEMORY.md ~/.openclaw/workspace/MEMORY.md
+# Copy workspace files for each agent
+for agent in cos coach infra dev; do
+  mkdir -p ~/.openclaw/workspace-${agent}
+  cp /opt/pib/pib/workspace-template/${agent}/*.md ~/.openclaw/workspace-${agent}/ 2>/dev/null \
+    || cp /opt/pib/pib/workspace-template/*.md ~/.openclaw/workspace-${agent}/
+done
+
+# Copy multi-agent config
+cp /opt/pib/pib/config/openclaw-agents.yaml ~/.openclaw/openclaw-agents.yaml
 ```
 
-These files tell the OpenClaw agent what it is (PIB), how to route messages (CLI commands), and what rules to follow (privacy, coaching, governance).
+These files tell each OpenClaw agent what it is (PIB), how to route messages (CLI commands), and what rules to follow (privacy, coaching, governance). See `config/openclaw-agents.yaml` for agent definitions.
 
 ---
 
@@ -146,8 +151,10 @@ nano /opt/pib/config/.env
 | `TWILIO_ACCOUNT_SID` | twilio.com → Console |
 | `TWILIO_AUTH_TOKEN` | twilio.com → Console |
 | `TWILIO_PHONE_NUMBER` | Your Twilio number |
-| `BLUEBUBBLES_SECRET` | Set during Phase 6 |
-| `BLUEBUBBLES_URL` | `http://localhost:1234` (default) |
+| `BLUEBUBBLES_JAMES_SECRET` | Set during Phase 6 (James's bridge Mini) |
+| `BLUEBUBBLES_JAMES_URL` | `http://james-mini.local:1234` |
+| `BLUEBUBBLES_LAURA_SECRET` | Set during Phase 6 (Laura's bridge Mini) |
+| `BLUEBUBBLES_LAURA_URL` | `http://laura-mini.local:1234` |
 | `SIRI_BEARER_TOKEN` | Generate: `openssl rand -hex 32` |
 | `PIB_DB_PATH` | `/opt/pib/data/pib.db` |
 
@@ -186,7 +193,7 @@ Since this is a single-machine setup (no bridge Minis yet), BlueBubbles runs on 
 3. Sign into iCloud with the Apple ID for iMessage
 4. Configure webhook:
    - URL: `http://localhost:3141/webhooks/bluebubbles` (or OpenClaw's channel endpoint)
-   - Secret: match `BLUEBUBBLES_SECRET` in `.env`
+   - Secret: match `BLUEBUBBLES_JAMES_SECRET` (or `BLUEBUBBLES_LAURA_SECRET` for Laura's bridge) in `.env`
 5. Enable auto-start (Login Items)
 6. Test: send an iMessage from your phone, verify webhook fires
 
@@ -196,22 +203,24 @@ Since this is a single-machine setup (no bridge Minis yet), BlueBubbles runs on 
 
 ## Phase 7: Agent Builds Integration Layer (~1-2 hours) [AGENT]
 
-The OpenClaw agent creates these files. Reference docs:
+The OpenClaw agent creates the scripts/core wrappers. Reference docs:
 - `docs/openclaw-integration.md` — architecture spec
 - `docs/pib-api-contract.md` — API endpoint definitions
-- `docs/diagrams/pib-console-wired.jsx` — React prototype (1,738 lines)
 - `scripts/core/README.md` — expected scripts
-- `console/README.md` — expected console files
 
-### Scripts to create:
+### Already exists (do NOT recreate):
+| File | Status |
+|------|--------|
+| `console/server.mjs` | ✅ EXISTS (940+ lines) |
+| `console/index.html` | ✅ EXISTS (758+ lines) |
+
+### Scripts/core wrappers to create during bootstrap:
 | File | Purpose |
 |------|---------|
 | `scripts/core/calendar_sync.mjs` | `gog calendar events --json` → `python -m pib.cli calendar-ingest $PIB_DB_PATH` |
 | `scripts/core/context_assembler.mjs` | Calls `python -m pib.cli context $PIB_DB_PATH --member {id}` |
 | `scripts/core/what_now.mjs` | Wrapper for `python -m pib.cli what-now $PIB_DB_PATH` |
 | `scripts/core/heartbeat_check.mjs` | SQLite health + gog connectivity |
-| `console/server.mjs` | Express on port 3333, REST API for dashboard |
-| `console/index.html` | Dashboard (scoreboard, stream, schedule, chat) |
 
 ### Cron jobs to configure:
 See the cron table in `workspace-template/AGENTS.md`.
@@ -285,7 +294,7 @@ See `PERSONAL_MINI_SETUP.md` for the 3-machine topology and sensor webhook contr
 | `/opt/pib/data/backups/` | Hourly backups |
 | `/opt/pib/config/.env` | Credentials (chmod 600) |
 | `/opt/pib/logs/` | Application logs |
-| `~/.openclaw/workspace/` | OpenClaw agent workspace files |
+| `~/.openclaw/workspace-{agent}/` | OpenClaw agent workspace files (cos, coach, infra, dev) |
 | `config/governance.yaml` | Action permission gates |
 | `config/agent_capabilities.yaml` | Agent role definitions |
 

@@ -780,33 +780,38 @@ async def cmd_backup(db, args: dict, agent_id: str) -> dict:
 async def cmd_webhook_receive(db, args: dict, agent_id: str) -> dict:
     """Receive and process a BlueBubbles webhook payload.
 
-    Per-bridge credential isolation: validates API key from BLUEBUBBLES_{BRIDGE_ID}_SECRET.
-    Forces member_id from bridge_id (james→m-james, laura→m-laura) regardless of payload.
+    Per-bridge credential isolation: validates API key from BLUEBUBBLES_{MEMBER}_SECRET.
+    Forces member_id from bridge identity (james→m-james, laura→m-laura).
     """
     from pib.ingest import IngestEvent, ingest, make_idempotency_key, resolve_member
 
     # Per-bridge credential validation
-    bridge_id = args.get("bridge_id", "").lower()
     provided_secret = args.get("api_key", "")
+    bridge_member_map = {
+        "james": ("BLUEBUBBLES_JAMES_SECRET", "m-james"),
+        "laura": ("BLUEBUBBLES_LAURA_SECRET", "m-laura"),
+    }
 
-    # Map bridge_id to member_id and environment variable
-    bridge_member_map = {"james": "m-james", "laura": "m-laura"}
-    if bridge_id not in bridge_member_map:
-        # Fallback to legacy single secret for backwards compat
-        expected_secret = os.environ.get("BLUEBUBBLES_SECRET", "")
-        if not expected_secret:
-            return {"error": "BLUEBUBBLES_SECRET not configured and no valid bridge_id"}
-        if provided_secret != expected_secret:
-            return {"error": "Invalid API key", "status": "unauthorized"}
-        forced_member_id = None
-    else:
-        env_key = f"BLUEBUBBLES_{bridge_id.upper()}_SECRET"
+    # Try explicit bridge_id first, then match by secret
+    bridge_id = args.get("bridge_id", "").lower()
+    forced_member_id = None
+
+    if bridge_id and bridge_id in bridge_member_map:
+        env_key, forced_member_id = bridge_member_map[bridge_id]
         expected_secret = os.environ.get(env_key, "")
         if not expected_secret:
             return {"error": f"{env_key} not configured"}
         if provided_secret != expected_secret:
             return {"error": f"Invalid API key for bridge {bridge_id}", "status": "unauthorized"}
-        forced_member_id = bridge_member_map[bridge_id]
+    else:
+        # No bridge_id — match secret against all configured bridges
+        for member, (env_key, member_id) in bridge_member_map.items():
+            secret = os.environ.get(env_key, "")
+            if secret and provided_secret == secret:
+                forced_member_id = member_id
+                break
+        if not forced_member_id:
+            return {"error": "Invalid API key — no matching BLUEBUBBLES_*_SECRET", "status": "unauthorized"}
 
     payload = args.get("payload", {})
     if not payload:

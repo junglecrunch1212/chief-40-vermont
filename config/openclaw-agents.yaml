@@ -1,0 +1,138 @@
+# openclaw-agents.yaml — Multi-agent deployment spec for PIB v5
+#
+# Defines how multiple OpenClaw agent instances run on one box.
+# Source of truth for agent capabilities: config/agent_capabilities.yaml
+# Source of truth for governance gates: config/governance.yaml
+#
+version: "1.0"
+updated: "2026-03-05"
+
+# ═══════════════════════════════════════════════════════════
+# AGENT INSTANCES
+# ═══════════════════════════════════════════════════════════
+
+agents:
+
+  pib-cos:
+    display_name: "PIB — Chief of Staff"
+    workspace_template: workspace-template/cos/
+    workspace_path: ~/.openclaw/workspace-cos/
+    model: anthropic/claude-sonnet-4-5
+    capabilities: none
+    channels:
+      - imessage
+      - signal
+      - webchat
+    cron: false
+    env:
+      PIB_CALLER_AGENT: cos
+      PIB_DB_PATH: /opt/pib/data/pib.db
+    notes: |
+      Main household agent. Handles all family interactions.
+      Reads everything (with privacy filters), writes through CLI only.
+
+  pib-coach:
+    display_name: "PIB — Coach"
+    workspace_template: workspace-template/coach/
+    workspace_path: ~/.openclaw/workspace-coach/
+    model: anthropic/claude-sonnet-4-5
+    capabilities: none
+    channels:
+      - imessage
+      - webchat
+    cron: false
+    env:
+      PIB_CALLER_AGENT: coach
+      PIB_DB_PATH: /opt/pib/data/pib.db
+    notes: |
+      James-facing ADHD coach. No financial data, no calendar writes,
+      no task creation. Completion and state updates only.
+
+  pib-dev:
+    display_name: "Poopsy-Dev"
+    workspace_template: workspace-template/dev/
+    workspace_path: ~/.openclaw/workspace-dev/
+    model: anthropic/claude-opus-4-6
+    capabilities: full
+    channels:
+      - webchat
+    cron: true
+    env:
+      PIB_CALLER_AGENT: dev
+      PIB_DB_PATH: /opt/pib/data/pib.db
+    notes: |
+      Admin agent. Full access. Webchat only — never on family channels.
+      Never messages Laura or family groups.
+
+  # ─── Non-interactive agents (no OpenClaw workspace needed) ───
+
+  pib-scoreboard:
+    display_name: "PIB — Scoreboard"
+    workspace_template: null    # No LLM, no workspace
+    workspace_path: null
+    model: none
+    capabilities: none
+    channels:
+      - http
+    cron: false
+    notes: |
+      Data-only display agent. Pure HTTP endpoint for kitchen TV.
+      No LLM, no interactive session.
+
+  pib-proactive:
+    display_name: "PIB — Proactive"
+    workspace_template: null    # Cron-only, no interactive workspace
+    workspace_path: null
+    model: none                 # Deterministic — no LLM
+    capabilities: none
+    channels:
+      - cron
+    cron: true
+    cron_schedule:
+      - "*/30 7-22 * * *"      # Proactive trigger scan
+    env:
+      PIB_CALLER_AGENT: proactive
+      PIB_DB_PATH: /opt/pib/data/pib.db
+    rate_limits:
+      max_messages_per_hour: 2
+      max_messages_per_day: 5
+      quiet_hours: "22:00-07:00"
+    notes: |
+      Cron-triggered only. Scans for triggers, sends nudges.
+      No interactive session, no LLM.
+
+# ═══════════════════════════════════════════════════════════
+# CHANNEL → AGENT ROUTING
+# ═══════════════════════════════════════════════════════════
+
+routing:
+  imessage:
+    default: pib-cos
+    keywords:
+      "coach": pib-coach
+  webchat:
+    default: pib-cos
+    tabs:
+      dashboard: pib-cos
+      admin: pib-dev
+  signal:
+    default: pib-cos
+  cron:
+    default: pib-proactive
+  http:
+    default: pib-scoreboard
+
+# ═══════════════════════════════════════════════════════════
+# DEPLOYMENT NOTES
+# ═══════════════════════════════════════════════════════════
+
+deployment:
+  setup_steps:
+    - "Copy workspace-template/{agent}/ files to the agent's workspace_path"
+    - "Set environment variables per agent (PIB_CALLER_AGENT, PIB_DB_PATH)"
+    - "Configure OpenClaw gateway with agent IDs and channel bindings"
+    - "Start gateway: openclaw gateway start"
+  shared_resources:
+    - "SQLite database: single instance, accessed via CLI by all agents"
+    - "Google auth: shared gog credentials"
+    - "workspace-template/shared/ contains master reference files"

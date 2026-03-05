@@ -1,5 +1,9 @@
 # Mac Mini Setup Walkthrough — Complete Beginner Guide
 
+> **📚 Doc Hierarchy:** This is the **canonical** bootstrap guide. For repeat setups, see [`BOOTSTRAP_INSTRUCTIONS.md`](BOOTSTRAP_INSTRUCTIONS.md) (condensed quick-reference). For bridge Mac Mini setup, see [`PERSONAL_MINI_SETUP.md`](PERSONAL_MINI_SETUP.md).
+>
+> **📁 Standard Paths:** All paths in this doc use the canonical layout: `PIB_HOME=/opt/pib/`, DB at `/opt/pib/data/pib.db`, console at `/opt/pib/console/server.mjs`, venv at `/opt/pib/venv/`, logs at `/opt/pib/logs/`, config at `/opt/pib/config/`.
+
 **You:** Have never used a Mac before.
 **Goal:** Mac Mini running OpenClaw + ready to deploy PIB v5.
 **Time:** ~2-3 hours, mostly waiting for downloads.
@@ -348,8 +352,10 @@ This is what lets PIB send and receive iMessages.
 
 ### 8.5 Store Credentials
 ```bash
-openclaw config set BLUEBUBBLES_URL http://localhost:1234
-openclaw config set BLUEBUBBLES_PASSWORD your-server-password-here
+openclaw config set BLUEBUBBLES_JAMES_URL http://james-bridge:1234
+openclaw config set BLUEBUBBLES_JAMES_SECRET your-james-bridge-password
+openclaw config set BLUEBUBBLES_LAURA_URL http://laura-bridge:1234
+openclaw config set BLUEBUBBLES_LAURA_SECRET your-laura-bridge-password
 ```
 
 ---
@@ -407,132 +413,95 @@ Then in Twilio console: Phone Number → your number → Messaging → Webhook U
 
 ---
 
-## PART 12: Create Agent Files (10 min)
+## PART 11.5: Port Allocation & Network Reference
 
-These are the files that tell OpenClaw who it is and what to do. Copy-paste each block into Terminal.
+### Port Allocation Table
 
-### 12.1 SOUL.md
+| Port | Service | Notes |
+|------|---------|-------|
+| 3141 | PIB CoS API (Python) | Direct CLI access, sensor ingest |
+| 3333 | Console dashboard | Kitchen TV scoreboard, web UI |
+| 18789 | OpenClaw gateway | Internal, don't expose externally |
+| 1234 | BlueBubbles server | Local only (per bridge Mini) |
+
+### Cloudflare Tunnel (for external webhooks)
+
+If you need Twilio/Siri webhooks to reach your Mac Mini from the internet:
+
 ```bash
-cat > ~/.openclaw/workspace/SOUL.md << 'AGENTFILE'
-# SOUL.md — PIB (Poopsy-in-a-Box)
+brew install cloudflared
+cloudflared tunnel login
+# Opens Safari — sign in to Cloudflare (free account)
 
-You are PIB — the Stice-Sclafani household Chief of Staff.
-
-## Prime Directives
-1. Deterministic data layer first. LLM for presentation, never for data classification.
-2. Offline-first. If any external API is down, degrade gracefully.
-3. Privacy fence. Laura's work calendar content never enters your context.
-4. One thing at a time. James has ADHD. Never present lists of 5+.
-5. Never guilt, shame, or compare family members.
-6. Celebrate completions. Always.
-
-## Your Architecture
-- You run on OpenClaw (L0: infrastructure — channels, cron, model routing)
-- Your brain is chief-40-vermont (L1: SQLite + deterministic engine, L2: LLM intelligence)
-- See docs/openclaw-integration.md for the full integration spec
-
-## Deployment
-Your first task is to deploy chief-40-vermont per docs/openclaw-integration.md.
-After deployment, expand this SOUL.md with full personality and coaching protocols
-from the build spec (pib-v5-build-spec.md §2).
-AGENTFILE
+cloudflared tunnel create pib
+cloudflared tunnel route dns pib pib.yourdomain.com
 ```
 
-### 12.2 AGENTS.md
+Then configure as a launchd service for auto-start:
 ```bash
-cat > ~/.openclaw/workspace/AGENTS.md << 'AGENTFILE'
-# AGENTS.md — PIB Deployment Agent
-
-## Mission
-Deploy chief-40-vermont on this OpenClaw instance per docs/openclaw-integration.md.
-
-## Phase 1: Deploy
-1. Clone chief-40-vermont repo into this workspace
-2. Install Python package (pip install -e ".[dev]")
-3. ✅ `src/pib/cli.py` already exists (1,023 lines, 26 commands, 6-layer permission boundary)
-4. Initialize SQLite (apply migrations, seed data)
-5. Write OpenClaw cron jobs (from integration spec §3.3)
-6. Write scripts/core/ wrappers (from integration spec §4)
-7. Build console server
-8. Expand SOUL.md from build spec
-9. Write routing tables in this file
-10. Run all probes from integration spec §9
-
-## Phase 2: Operate
-After deployment, this file will contain message routing tables.
-See integration spec §4.2 for the pattern.
-
-## Hard Rules
-- Read docs/openclaw-integration.md FIRST before any build work
-- Read docs/pib-v5-build-spec.md for domain knowledge
-- NEVER put LLM in the data path (Gene 1, Gene 5, Gene 7)
-- All writes go through state machine guards
-- Test with pytest before declaring done
-AGENTFILE
+cloudflared service install
 ```
 
-### 12.3 USER.md
-```bash
-cat > ~/.openclaw/workspace/USER.md << 'AGENTFILE'
-# USER.md — Household
+Set the Twilio webhook URL to `https://pib.yourdomain.com/webhooks/twilio`.
 
-- James (43, stay-at-home dad, ADHD) — jrstice@gmail.com, +14048495800
-- Laura (38, family law partner) — lcholland12@gmail.com, +13364080952
-- Charlie (6, shared custody with coparent Mike)
-- Baby girl arriving May 2026
-- Captain (dog, needs exercise 2x/day)
-- Location: Atlanta, GA (America/New_York)
-- Custody: Thursday evenings Charlie with bio dad Mike
-- Laura WFH: Tue/Fri. Office: Mon/Wed/Thu (leaves ~9:30am, home ~6:30pm)
-- Charlie school: 8am–5:30pm M-F (aftercare)
-AGENTFILE
+**Alternative (quick testing):** `brew install ngrok && ngrok http 18789`
+
+**Alternative (personal access only):** `brew install tailscale` — good for SSH + console, but not for Twilio webhooks (needs public URL).
+
+---
+
+## PART 12: Create Agent Files (5 min)
+
+These are the files that tell OpenClaw who it is and what to do. Pre-built templates exist in the repo — copy them into each agent workspace.
+
+### 12.1 Multi-Agent Workspace Setup
+
+PIB uses a multi-agent structure. Each agent gets its own workspace directory with tailored files:
+
+```bash
+# Copy workspace files for each agent from the repo templates
+for agent in cos coach infra dev; do
+  mkdir -p ~/.openclaw/workspace-${agent}
+  cp /opt/pib/pib/workspace-template/${agent}/*.md ~/.openclaw/workspace-${agent}/
+done
 ```
 
-### 12.4 HEARTBEAT.md
+If `workspace-template/` doesn't have per-agent subdirectories yet, copy the shared templates:
+
 ```bash
-cat > ~/.openclaw/workspace/HEARTBEAT.md << 'AGENTFILE'
-# HEARTBEAT.md
-
-Run: python3 -m pib.cli health --json
-
-Report any items with status "error" or "warn". If all "ok", reply HEARTBEAT_OK.
-
-Also check:
-- gog calendar list --no-input (Google auth still valid?)
-- Console server responding on port 3333?
-AGENTFILE
+for agent in cos coach infra dev; do
+  mkdir -p ~/.openclaw/workspace-${agent}
+  cp /opt/pib/pib/workspace-template/SOUL.md ~/.openclaw/workspace-${agent}/
+  cp /opt/pib/pib/workspace-template/AGENTS.md ~/.openclaw/workspace-${agent}/
+  cp /opt/pib/pib/workspace-template/HEARTBEAT.md ~/.openclaw/workspace-${agent}/
+  cp /opt/pib/pib/workspace-template/USER.md ~/.openclaw/workspace-${agent}/
+  cp /opt/pib/pib/workspace-template/TOOLS.md ~/.openclaw/workspace-${agent}/
+  cp /opt/pib/pib/workspace-template/IDENTITY.md ~/.openclaw/workspace-${agent}/ 2>/dev/null
+  cp /opt/pib/pib/workspace-template/MEMORY.md ~/.openclaw/workspace-${agent}/
+done
 ```
 
-### 12.5 MEMORY.md
-```bash
-cat > ~/.openclaw/workspace/MEMORY.md << 'AGENTFILE'
-# MEMORY.md
+### 12.2 Multi-Agent OpenClaw Configuration
 
-(Fresh instance. Memories will accumulate from operation.)
-AGENTFILE
+Configure OpenClaw to use multiple agents by referencing the agent config file:
+
+```bash
+# Copy the agent configuration
+cp /opt/pib/pib/config/openclaw-agents.yaml ~/.openclaw/openclaw-agents.yaml
 ```
 
-### 12.6 TOOLS.md
+See `config/openclaw-agents.yaml` for the full agent definitions (CoS, Coach, Infra, Dev) including lane isolation, model routing, and cron assignments.
+
+### 12.3 Verify Agent Files
+
 ```bash
-cat > ~/.openclaw/workspace/TOOLS.md << 'AGENTFILE'
-# TOOLS.md
-
-## Python CLI (PIB engine)
-All PIB domain logic is accessed via: python3 -m pib.cli <command> --json
-Working directory: ~/.openclaw/workspace/pib/
-Database: ~/.openclaw/workspace/state/pib.db
-
-## Google Workspace
-Use gog CLI (ships with OpenClaw):
-- gog calendar [list|events|create] --account jrstice@gmail.com
-- gog sheets [get|set] <sheet_id> <range>
-- gog gmail [list|read|send]
-
-## Console
-Node.js server at ~/.openclaw/workspace/console/server.mjs
-Port: 3333
-AGENTFILE
+for agent in cos coach infra dev; do
+  echo "=== workspace-${agent} ==="
+  ls ~/.openclaw/workspace-${agent}/*.md
+done
 ```
+
+Each workspace should contain at minimum: `SOUL.md`, `AGENTS.md`, `USER.md`, `HEARTBEAT.md`, `MEMORY.md`, `TOOLS.md`.
 
 ---
 
@@ -564,9 +533,9 @@ cat > ~/Library/LaunchAgents/com.openclaw.gateway.plist << 'PLIST'
     <key>KeepAlive</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>/tmp/openclaw-gateway.log</string>
+    <string>/opt/pib/logs/openclaw-gateway.log</string>
     <key>StandardErrorPath</key>
-    <string>/tmp/openclaw-gateway-err.log</string>
+    <string>/opt/pib/logs/openclaw-gateway-err.log</string>
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
@@ -619,12 +588,10 @@ gog calendar list --no-input 2>&1 | head -3   # Calendar names
 gog sheets list --no-input 2>&1 | head -3     # Spreadsheet names
 
 echo "=== AGENT FILES ==="
-ls ~/.openclaw/workspace/SOUL.md    # Should exist
-ls ~/.openclaw/workspace/AGENTS.md  # Should exist
-ls ~/.openclaw/workspace/USER.md    # Should exist
-ls ~/.openclaw/workspace/HEARTBEAT.md  # Should exist
-ls ~/.openclaw/workspace/MEMORY.md  # Should exist
-ls ~/.openclaw/workspace/TOOLS.md   # Should exist
+for agent in cos coach infra dev; do
+  echo -n "workspace-${agent}: "
+  ls ~/.openclaw/workspace-${agent}/SOUL.md 2>/dev/null && echo "OK" || echo "MISSING"
+done
 
 echo "=== NETWORK ==="
 ipconfig getifaddr en0              # Your local IP
@@ -645,8 +612,8 @@ echo -n "OpenClaw: " && openclaw --version 2>/dev/null || echo "NOT INSTALLED"
 echo -n "GitHub: " && ssh -T git@github.com 2>&1 | head -1
 echo -n "Google: " && gog calendar list --no-input 2>&1 | head -1
 echo -n "Agent files: "
-for f in SOUL.md AGENTS.md USER.md HEARTBEAT.md MEMORY.md TOOLS.md; do
-  [ -f ~/.openclaw/workspace/$f ] && echo -n "✓$f " || echo -n "✗$f "
+for agent in cos coach infra dev; do
+  [ -f ~/.openclaw/workspace-${agent}/SOUL.md ] && echo -n "✓${agent} " || echo -n "✗${agent} "
 done
 echo ""
 echo -n "IP: " && ipconfig getifaddr en0
@@ -923,11 +890,12 @@ Once the agent says it's done:
 ### From Terminal:
 ```bash
 # Engine works?
-cd ~/.openclaw/workspace/pib
+source /opt/pib/venv/bin/activate
+export PIB_DB_PATH=/opt/pib/data/pib.db
 python3 -m pib.cli what-now --member m-james --json
 
 # Tests pass?
-pytest tests/ -v
+cd /opt/pib/pib && pytest tests/ -v
 
 # Console works?
 curl http://localhost:3333/api/household-status

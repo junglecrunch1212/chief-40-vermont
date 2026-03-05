@@ -1,8 +1,10 @@
 # Personal Mac Mini Setup Guide — PIB v5 (chief-40-vermont)
 
-> **Version:** 1.0 · **Date:** 2026-03-04 · **Status:** 📋 PROPOSED
+> **Version:** 1.1 · **Date:** 2026-03-05 · **Status:** ✅ READY
 >
-> This guide configures James's and Laura's personal Mac Minis as Apple bridge nodes that push sensor data to the central CoS Mac Mini running OpenClaw/PIB.
+> **📚 Doc Hierarchy:** See [`MAC_MINI_WALKTHROUGH.md`](MAC_MINI_WALKTHROUGH.md) for the canonical Brain Mac Mini setup. This guide configures James's and Laura's personal Mac Minis as Apple bridge nodes that push sensor data to the central CoS Mac Mini running OpenClaw/PIB. The Brain uses the multi-agent structure defined in `config/openclaw-agents.yaml`.
+>
+> **📁 Standard Ports:** CoS API = `3141`, Console = `3333`, BlueBubbles = `1234`
 
 ---
 

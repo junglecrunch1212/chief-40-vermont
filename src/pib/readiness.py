@@ -5,12 +5,6 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-# Per-bridge BlueBubbles secrets (one per personal Mac Mini)
-BRIDGE_SECRETS = [
-    "BLUEBUBBLES_JAMES_SECRET",
-    "BLUEBUBBLES_LAURA_SECRET",
-]
-
 CRITICAL_ENV = [
     "ANTHROPIC_API_KEY",
     "TWILIO_AUTH_TOKEN",
@@ -49,14 +43,22 @@ async def evaluate_readiness(db) -> dict:
     for key in CRITICAL_ENV:
         checks[f"env_{key.lower()}"] = {"ok": _is_set(key), "required": True}
 
-    # Per-bridge BlueBubbles secrets — at least one must be set for bridge support
-    any_bridge_secret = any(_is_set(key) for key in BRIDGE_SECRETS)
-    for key in BRIDGE_SECRETS:
-        checks[f"env_{key.lower()}"] = {"ok": _is_set(key), "required": False}
-    checks["env_bluebubbles_bridges"] = {
-        "ok": any_bridge_secret,
+    # BlueBubbles: at least one bridge (secret+url pair) must be configured
+    bridge_pairs = [
+        ("BLUEBUBBLES_JAMES_SECRET", "BLUEBUBBLES_JAMES_URL"),
+        ("BLUEBUBBLES_LAURA_SECRET", "BLUEBUBBLES_LAURA_URL"),
+    ]
+    any_bridge = False
+    for secret_key, url_key in bridge_pairs:
+        pair_ok = _is_set(secret_key) and _is_set(url_key)
+        checks[f"env_{secret_key.lower()}"] = {"ok": _is_set(secret_key), "required": False}
+        checks[f"env_{url_key.lower()}"] = {"ok": _is_set(url_key), "required": False}
+        if pair_ok:
+            any_bridge = True
+    checks["bluebubbles_bridge"] = {
+        "ok": any_bridge,
         "required": True,
-        "detail": "At least one of BLUEBUBBLES_JAMES_SECRET or BLUEBUBBLES_LAURA_SECRET must be set",
+        "detail": "At least one BLUEBUBBLES_{MEMBER}_SECRET + URL pair must be set",
     }
 
     for key in OPTIONAL_ENV:

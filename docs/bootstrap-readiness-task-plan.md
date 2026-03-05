@@ -2,10 +2,20 @@
 
 **Context:** PIB v5 (chief-40-vermont) runs on OpenClaw as L0 infrastructure. This plan defines what PIB must build vs what OpenClaw already provides. Read alongside:
 - `docs/openclaw-integration.md` — architecture spec (what to keep/replace/build)
-- `MAC_MINI_BOOTSTRAP.md` — technical checklist
-- `MAC_MINI_WALKTHROUGH.md` — step-by-step beginner setup
+- `MAC_MINI_WALKTHROUGH.md` — **canonical** step-by-step beginner setup
+- `BOOTSTRAP_INSTRUCTIONS.md` — condensed quick-reference for repeat setups
+- `PERSONAL_MINI_SETUP.md` — bridge Mac Mini setup guide
 
 **Deployment model:** OpenClaw daemon on Mac Mini handles channels, cron, model routing, Google auth (`gog` CLI). PIB is a Python package called via `pib.cli` from OpenClaw scripts. SQLite is the SSOT. No standalone FastAPI server.
+
+### Doc Hierarchy (as of 2026-03-05)
+
+| Doc | Role | Status |
+|-----|------|--------|
+| `MAC_MINI_WALKTHROUGH.md` | **Canonical** entry point — beginner-friendly, 10-prompt deployment | ✅ Active |
+| `BOOTSTRAP_INSTRUCTIONS.md` | Condensed quick-reference for repeat setups | ✅ Active |
+| `PERSONAL_MINI_SETUP.md` | Bridge Mac Mini setup (James/Laura personal Minis) | ✅ READY |
+| `archive/MAC_MINI_BOOTSTRAP.md` | Archived — superseded by Walkthrough | 📦 Archived |
 
 ---
 
@@ -74,16 +84,16 @@ These are provided by OpenClaw L0. PIB does not build or manage them:
 - Incremental sync every 15 min (OpenClaw cron). Full resync daily at 2 AM.
 - **DoD:** `whatNow()` sees today's calendar events. Morning digest includes schedule. Conflicts detected. `gog` failure degrades gracefully (uses last-known data + warns).
 
-### T-011: Gmail → Comms Inbox
-- `scripts/core/gmail_sync.mjs` calls `gog gmail list --json` with incremental cursor.
+### T-011: Gmail → Comms Inbox 📋 PROPOSED
+- `scripts/core/gmail_sync.mjs` 📋 PROPOSED calls `gog gmail list --json` with incremental cursor.
 - Feeds into `pib.cli comms-ingest` which maps to `ops_comms` with idempotency.
 - Batch window assignment (morning/midday/evening) via deterministic `assign_batch_window()`.
 - Urgency classification: keyword-based (deterministic), not LLM.
 - Extraction pipeline proposes tasks/events from message content (requires approval gate).
 - **DoD:** "Do I need to respond to anyone?" works. Comms batched for ADHD-friendly delivery windows.
 
-### T-012: Financial OS Sync
-- `scripts/core/finance_sync.mjs` calls `gog sheets get` on Financial OS spreadsheet.
+### T-012: Financial OS Sync 📋 PROPOSED
+- `scripts/core/finance_sync.mjs` 📋 PROPOSED calls `gog sheets get` on Financial OS spreadsheet.
 - Normalizes into `fin_transactions` + recomputes `fin_budget_snapshot`.
 - Dedup by external_id. Merchant normalization via `fin_merchant_rules`.
 - Sync every 15 min (OpenClaw cron).
@@ -242,8 +252,8 @@ These are provided by OpenClaw L0. PIB does not build or manage them:
 ## Execution Sequence
 
 ```
-Phase 1 — Bootstrap (MAC_MINI_WALKTHROUGH.md)
-  Mac setup → software → OpenClaw → credentials → agent files
+Phase 1 — Bootstrap (MAC_MINI_WALKTHROUGH.md = canonical entry point)
+  Mac setup → software → OpenClaw → credentials → multi-agent workspace files
   Time: ~2 hours human, then agent takes over
 
 Phase 2 — Core Build (agent executes autonomously)

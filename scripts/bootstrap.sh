@@ -143,6 +143,34 @@ else
     echo "   No plist found at $PLIST_SRC"
 fi
 
+# ─── 7b. Copy workspace templates to OpenClaw workspaces ───
+echo ""
+echo "7b. Copying workspace templates..."
+OPENCLAW_BASE="$HOME/.openclaw"
+for agent in cos coach dev; do
+  mkdir -p "$OPENCLAW_BASE/workspace-$agent"
+  if ls "$PIB_REPO/workspace-template/$agent/"*.md 1>/dev/null 2>&1; then
+    cp "$PIB_REPO/workspace-template/$agent/"*.md "$OPENCLAW_BASE/workspace-$agent/"
+    echo "   Copied $agent templates"
+  else
+    echo "   No .md files for $agent (skipped)"
+  fi
+done
+
+# ─── 7c. Install console dependencies ───
+echo ""
+echo "7c. Installing console dependencies..."
+if command -v node >/dev/null && [[ "$SKIP_FRONTEND" -eq 0 ]]; then
+  if [ -d "$PIB_REPO/console" ]; then
+    cd "$PIB_REPO/console" && npm install
+    echo "   Console dependencies installed"
+  else
+    echo "   No console/ directory found (skipped)"
+  fi
+else
+  echo "   Skipped (no node or --skip-frontend)"
+fi
+
 # ─── 8. Verification ───
 echo ""
 echo "8. Verification..."

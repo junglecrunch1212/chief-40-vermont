@@ -563,6 +563,319 @@ function seedData(db) {
     VALUES (?, ?, ?)
   `).run('household_timezone', 'America/New_York', 'Atlanta');
   
+  // ─── Devices ───
+  console.log("  Devices...");
+  
+  const devices = [
+    { id: 'dev-mac-mini', display_name: 'Mac Mini (Home)', device_type: 'mac', status: 'active',
+      owner_member_id: 'm-james', location: 'Home office' },
+    { id: 'dev-james-iphone', display_name: 'James iPhone', device_type: 'ios', status: 'active',
+      owner_member_id: 'm-james' },
+    { id: 'dev-laura-iphone', display_name: 'Laura iPhone', device_type: 'ios', status: 'active',
+      owner_member_id: 'm-laura' },
+  ];
+  
+  const insertDevice = db.prepare(`
+    INSERT INTO comms_devices (id, display_name, device_type, status, owner_member_id, location, config_json, active)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  
+  for (const d of devices) {
+    insertDevice.run(d.id, d.display_name, d.device_type, d.status, d.owner_member_id, d.location || null, '{}', 1);
+  }
+  
+  // ─── Accounts ───
+  console.log("  Accounts...");
+  
+  const accountsData = [
+    { id: 'acc-gmail-james', account_type: 'email', address: 'james@example.com', display_name: 'James Gmail',
+      owner_member_id: 'm-james', provider: 'gmail', auth_status: 'active' },
+    { id: 'acc-apple-james', account_type: 'phone', address: '+14045550100', display_name: 'James iMessage',
+      owner_member_id: 'm-james', provider: 'apple', auth_status: 'active' },
+    { id: 'acc-apple-laura', account_type: 'phone', address: '+14045550101', display_name: 'Laura iMessage',
+      owner_member_id: 'm-laura', provider: 'apple', auth_status: 'active' },
+    { id: 'acc-outlook-laura', account_type: 'email', address: 'laura.smith@lawfirm.com', display_name: 'Laura Work Email',
+      owner_member_id: 'm-laura', provider: 'outlook', auth_status: 'active' },
+  ];
+  
+  const insertAccount = db.prepare(`
+    INSERT INTO comms_accounts (id, account_type, address, display_name, owner_member_id, provider, auth_status, capabilities_json, config_json, active)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  
+  for (const a of accountsData) {
+    insertAccount.run(a.id, a.account_type, a.address, a.display_name, a.owner_member_id, a.provider, a.auth_status, '{}', '{}', 1);
+  }
+  
+  // ─── Channels ───
+  console.log("  Channels...");
+  
+  const channelsData = [
+    { id: 'ch-gmail-james', display_name: 'Gmail (James)', icon: '📧', category: 'conversational',
+      adapter_id: 'email', enabled: 1, setup_complete: 1,
+      privacy_level: 'full', content_storage: 'full', outbound_requires_approval: 1,
+      config_json: JSON.stringify({ capabilities: ['in', 'out', 'draft', 'extract'], account_id: 'acc-gmail-james' }) },
+    { id: 'ch-imessage-james', display_name: 'iMessage (James)', icon: '💬', category: 'conversational',
+      adapter_id: 'imessage', enabled: 1, setup_complete: 1,
+      privacy_level: 'full', content_storage: 'full', outbound_requires_approval: 0,
+      config_json: JSON.stringify({ capabilities: ['in', 'out'], account_id: 'acc-apple-james', device_id: 'dev-james-iphone' }) },
+    { id: 'ch-sms-james', display_name: 'SMS (James)', icon: '💬', category: 'conversational',
+      adapter_id: 'sms', enabled: 1, setup_complete: 1,
+      privacy_level: 'full', content_storage: 'full', outbound_requires_approval: 1,
+      config_json: JSON.stringify({ capabilities: ['in', 'out'], account_id: 'acc-apple-james' }) },
+    { id: 'ch-voice-james', display_name: 'Voice Memos (James)', icon: '🎤', category: 'capture',
+      adapter_id: 'voice', enabled: 1, setup_complete: 1,
+      privacy_level: 'full', content_storage: 'full', outbound_requires_approval: 0,
+      config_json: JSON.stringify({ capabilities: ['in', 'extract', 'voice'], device_id: 'dev-james-iphone' }) },
+    { id: 'ch-outlook-laura', display_name: 'Outlook (Laura Work)', icon: '📨', category: 'conversational',
+      adapter_id: 'email', enabled: 1, setup_complete: 1,
+      privacy_level: 'privileged', content_storage: 'metadata_only', outbound_requires_approval: 1,
+      config_json: JSON.stringify({ capabilities: ['in'], account_id: 'acc-outlook-laura' }) },
+  ];
+  
+  const insertChannel = db.prepare(`
+    INSERT INTO comms_channels (id, display_name, icon, category, adapter_id, enabled, setup_complete,
+      privacy_level, content_storage, outbound_requires_approval, config_json, sort_order)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  
+  for (const ch of channelsData) {
+    insertChannel.run(ch.id, ch.display_name, ch.icon, ch.category, ch.adapter_id, ch.enabled, ch.setup_complete,
+      ch.privacy_level, ch.content_storage, ch.outbound_requires_approval, ch.config_json, 100);
+  }
+  
+  // ─── Channel Health ───
+  console.log("  Channel health...");
+  
+  for (const ch of channelsData) {
+    db.prepare(`
+      INSERT INTO comms_channel_health (channel_id, status, consecutive_failures, last_poll_at, last_successful_at)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(ch.id, ch.enabled ? 'active' : 'inactive', 0, isoNow(), isoNow());
+  }
+  
+  // ─── Member Channel Access ───
+  console.log("  Member channel access...");
+  
+  const memberAccess = [
+    // James admin on most
+    { member_id: 'm-james', channel_id: 'ch-gmail-james', access_level: 'admin', can_approve_drafts: 1, batch_window: 'morning' },
+    { member_id: 'm-james', channel_id: 'ch-imessage-james', access_level: 'admin', can_approve_drafts: 1, batch_window: 'evening' },
+    { member_id: 'm-james', channel_id: 'ch-sms-james', access_level: 'admin', can_approve_drafts: 1, batch_window: 'evening' },
+    { member_id: 'm-james', channel_id: 'ch-voice-james', access_level: 'admin', can_approve_drafts: 1, batch_window: null },
+    { member_id: 'm-james', channel_id: 'ch-outlook-laura', access_level: 'metadata', can_approve_drafts: 0, batch_window: null },
+    
+    // Laura admin on her channels
+    { member_id: 'm-laura', channel_id: 'ch-outlook-laura', access_level: 'admin', can_approve_drafts: 1, batch_window: 'midday' },
+    { member_id: 'm-laura', channel_id: 'ch-gmail-james', access_level: 'read', can_approve_drafts: 0, batch_window: null },
+    { member_id: 'm-laura', channel_id: 'ch-imessage-james', access_level: 'read', can_approve_drafts: 0, batch_window: null },
+  ];
+  
+  const insertAccess = db.prepare(`
+    INSERT INTO comms_channel_member_access (id, member_id, channel_id, access_level, can_approve_drafts, batch_window,
+      show_in_inbox, receives_proactive, digest_include, notify_on_urgent)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  
+  for (const ma of memberAccess) {
+    const id = `ca-${ma.member_id}-${ma.channel_id}`;
+    insertAccess.run(id, ma.member_id, ma.channel_id, ma.access_level, ma.can_approve_drafts, ma.batch_window || null,
+      1, 1, 1, ma.access_level === 'admin' ? 1 : 0);
+  }
+  
+  // ─── Comms Messages ───
+  console.log("  Comms messages...");
+  
+  const comms = [
+    { id: 'comm-001', date: today(), channel: 'ch-gmail-james', direction: 'inbound',
+      from_addr: 'contractor@example.com', to_addr: 'james@example.com', member_id: 'm-james',
+      subject: 'Re: Baby room painting estimate', summary: 'Contractor confirming Saturday 9am appointment',
+      body_snippet: 'Hi James, confirming our appointment this Saturday at 9am to give you an estimate for the nursery painting. Should take about 30 minutes.',
+      needs_response: 1, response_urgency: 'timely', batch_window: 'morning', outcome: 'pending' },
+    { id: 'comm-002', date: today(), channel: 'ch-imessage-james', direction: 'inbound',
+      from_addr: '+14045559999', to_addr: '+14045550100', member_id: 'm-james',
+      subject: null, summary: 'Charlie school pickup coordination',
+      body_snippet: 'Hey can you grab Charlie today? Running late from meeting.',
+      needs_response: 1, response_urgency: 'urgent', batch_window: null, outcome: 'pending' },
+    { id: 'comm-003', date: yesterday(), channel: 'ch-gmail-james', direction: 'inbound',
+      from_addr: 'newsletter@pottery-barn.com', to_addr: 'james@example.com', member_id: 'm-james',
+      subject: 'New baby furniture sale', summary: 'Marketing newsletter',
+      body_snippet: 'Save 20% on all nursery furniture this weekend only!',
+      needs_response: 0, response_urgency: 'normal', batch_window: 'evening', outcome: 'handled' },
+    { id: 'comm-004', date: today(), channel: 'ch-outlook-laura', direction: 'inbound',
+      from_addr: 'partner@lawfirm.com', to_addr: 'laura.smith@lawfirm.com', member_id: 'm-laura',
+      subject: 'Client deposition rescheduled', summary: '[Privileged] Work calendar update',
+      body_snippet: null, needs_response: 0, response_urgency: 'timely', batch_window: 'midday', outcome: 'handled' },
+    { id: 'comm-005', date: today(), channel: 'ch-voice-james', direction: 'inbound',
+      from_addr: null, to_addr: null, member_id: 'm-james',
+      subject: null, summary: 'Voice capture: grocery list additions',
+      body_snippet: 'Captured items: bananas, peanut butter, bread',
+      needs_response: 0, response_urgency: 'normal', batch_window: null, outcome: 'handled',
+      extraction_status: 'completed', extracted_items: JSON.stringify(['bananas', 'peanut butter', 'bread']) },
+    { id: 'comm-006', date: today(), channel: 'ch-gmail-james', direction: 'outbound',
+      from_addr: 'james@example.com', to_addr: 'roofer@example.com', member_id: 'm-james',
+      subject: 'Re: Roof leak estimate', summary: 'Draft reply to roofer',
+      body_snippet: null, needs_response: 0, draft_status: 'pending',
+      draft_response: 'Hi Dan, Saturday works great. See you at 9am. Thanks!',
+      batch_window: 'morning', outcome: 'draft' },
+  ];
+  
+  const insertComm = db.prepare(`
+    INSERT INTO ops_comms (id, date, channel, direction, from_addr, to_addr, member_id, item_ref, task_ref,
+      thread_id, subject, summary, body_snippet, needs_response, response_urgency, batch_window, batch_date,
+      extraction_status, extracted_items, draft_response, draft_status, snoozed_until, outcome)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  
+  for (const c of comms) {
+    insertComm.run(
+      c.id, c.date, c.channel, c.direction, c.from_addr || null, c.to_addr || null, c.member_id,
+      c.item_ref || null, c.task_ref || null, c.thread_id || null, c.subject || null,
+      c.summary, c.body_snippet || null, c.needs_response || 0, c.response_urgency || 'normal',
+      c.batch_window || null, c.batch_date || c.date, c.extraction_status || 'none',
+      c.extracted_items || null, c.draft_response || null, c.draft_status || 'none',
+      c.snoozed_until || null, c.outcome || 'pending'
+    );
+  }
+  
+  // ─── Captures ───
+  console.log("  Capture demo data...");
+  
+  // Seed notebooks
+  const notebooks = [
+    { id: 'nb-inbox', member_id: 'm-james', name: 'Inbox', slug: 'inbox', icon: '📥', is_system: 1 },
+    { id: 'nb-kitchen', member_id: null, name: 'Kitchen', slug: 'kitchen', icon: '🍽️', is_system: 0 },
+    { id: 'nb-ideas', member_id: 'm-james', name: 'Ideas', slug: 'ideas', icon: '💡', is_system: 0 },
+    { id: 'nb-reference', member_id: 'm-james', name: 'Reference', slug: 'reference', icon: '📚', is_system: 0 },
+    { id: 'nb-kids', member_id: null, name: 'Kids', slug: 'kids', icon: '👶', is_system: 0 },
+    { id: 'nb-home', member_id: null, name: 'Home', slug: 'home', icon: '🏠', is_system: 0 },
+    { id: 'nb-health', member_id: 'm-james', name: 'Health', slug: 'health', icon: '💊', is_system: 0 },
+  ];
+  
+  const insertNotebook = db.prepare(`
+    INSERT INTO cap_notebooks (id, member_id, name, slug, icon, is_system)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `);
+  
+  for (const nb of notebooks) {
+    insertNotebook.run(nb.id, nb.member_id, nb.name, nb.slug, nb.icon, nb.is_system);
+  }
+  
+  // Seed captures
+  const captures = [
+    // Inbox/unsorted (2)
+    {
+      id: 'cap-001', member_id: 'm-james', raw_text: 'Voice note: Remember to ask Mike about the custody swap next Thursday. He mentioned possibly switching to Wednesday instead.',
+      title: 'Mike custody schedule change', capture_type: 'note', source: 'voice', notebook: 'inbox',
+      triage_status: 'raw', created_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString()
+    },
+    {
+      id: 'cap-002', member_id: 'm-james', raw_text: 'Need to research best practices for introducing solid foods to babies. Laura mentioned baby-led weaning.',
+      title: 'Baby solid foods research', capture_type: 'note', source: 'chat', notebook: 'inbox',
+      triage_status: 'raw', created_at: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString()
+    },
+    
+    // Kitchen/recipes (2)
+    {
+      id: 'cap-003', member_id: 'm-james',
+      raw_text: 'One-pot chicken and rice: Brown 4 chicken thighs, remove. Sauté onion and garlic, add 2 cups rice, 3 cups broth. Return chicken, simmer 25min covered. Charlie loved it!',
+      title: 'One-Pot Chicken and Rice', body: 'Simple weeknight winner. Charlie devoured this.',
+      capture_type: 'recipe', source: 'chat', notebook: 'kitchen', triage_status: 'organized',
+      recipe_data: JSON.stringify({
+        servings: 4,
+        prep_min: 10,
+        cook_min: 30,
+        difficulty: 'Easy',
+        meal_type: 'Dinner',
+        cuisine: 'Comfort',
+        kid_approved: true,
+        made_count: 3,
+        rating: 5,
+        last_made_at: yesterday()
+      }),
+      created_at: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString()
+    },
+    {
+      id: 'cap-004', member_id: 'm-james',
+      raw_text: 'Breakfast egg muffins: Beat 8 eggs, add cheese, veggies, pour into muffin tin, bake 20min at 350F. Freezes great for quick mornings.',
+      title: 'Make-Ahead Egg Muffins', body: 'Perfect for busy mornings. Can make a batch on Sunday.',
+      capture_type: 'recipe', source: 'chat', notebook: 'kitchen', triage_status: 'organized',
+      recipe_data: JSON.stringify({
+        servings: 6,
+        prep_min: 15,
+        cook_min: 20,
+        difficulty: 'Easy',
+        meal_type: 'Breakfast',
+        cuisine: 'American',
+        kid_approved: true,
+        made_count: 0,
+        rating: 0
+      }),
+      created_at: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
+    },
+    
+    // Kids (1)
+    {
+      id: 'cap-005', member_id: 'm-james',
+      raw_text: 'Charlie school note: Spring field trip to zoo on March 18. Need signed permission slip and $15 by Friday. Pack lunch.',
+      title: 'Charlie zoo field trip - March 18', capture_type: 'note', source: 'chat', notebook: 'kids',
+      triage_status: 'organized', tags: JSON.stringify(['school', 'deadline', 'Charlie']),
+      created_at: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString()
+    },
+    
+    // Home (1)
+    {
+      id: 'cap-006', member_id: 'm-james',
+      raw_text: 'Contractor quote from Dan: Roof leak repair over nursery - $850. Includes flashing replacement and shingle patch. Available next Saturday.',
+      title: 'Roof leak quote - $850', capture_type: 'note', source: 'voice', notebook: 'home',
+      triage_status: 'organized', tags: JSON.stringify(['contractor', 'home-repair', 'quote']),
+      created_at: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString()
+    },
+    
+    // Health (1)
+    {
+      id: 'cap-007', member_id: 'm-james',
+      raw_text: 'Dr. Stevens instructions: Take medication 30min before breakfast for best absorption. If evening dose causes sleep issues, can switch to morning double dose after consulting.',
+      title: 'Medication timing notes from Dr. Stevens', capture_type: 'log', source: 'chat', notebook: 'health',
+      triage_status: 'organized', tags: JSON.stringify(['medication', 'doctor', 'instructions']),
+      created_at: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString()
+    },
+    
+    // Ideas (1 pinned)
+    {
+      id: 'cap-008', member_id: 'm-james',
+      raw_text: 'Blog post idea: "The ADHD Parent\'s Survival Guide to Newborn Sleep Deprivation" - cover energy management, medication timing, partner coordination, when to ask for help.',
+      title: 'Blog: ADHD + Newborn Sleep', capture_type: 'idea', source: 'chat', notebook: 'ideas',
+      triage_status: 'organized', pinned: 1, tags: JSON.stringify(['blog', 'adhd', 'parenting']),
+      created_at: new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString()
+    },
+    
+    // Reference (1 archived)
+    {
+      id: 'cap-009', member_id: 'm-james',
+      raw_text: 'Captain vet record: Annual checkup Feb 12, 2026. Weight 68lbs (up 2lbs). Heartworm negative. Bordatella booster given. Next appointment Aug 2026.',
+      title: 'Captain vet visit - Feb 2026', capture_type: 'reference', source: 'chat', notebook: 'reference',
+      triage_status: 'organized', archived: 1, archived_at: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(),
+      created_at: new Date(Date.now() - 21 * 24 * 60 * 60 * 1000).toISOString()
+    },
+  ];
+  
+  const insertCapture = db.prepare(`
+    INSERT INTO cap_captures (
+      id, member_id, raw_text, title, body, capture_type, source, notebook,
+      triage_status, tags, pinned, archived, archived_at, recipe_data, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  
+  for (const cap of captures) {
+    insertCapture.run(
+      cap.id, cap.member_id, cap.raw_text, cap.title, cap.body || null,
+      cap.capture_type, cap.source, cap.notebook, cap.triage_status,
+      cap.tags || null, cap.pinned || 0, cap.archived || 0, cap.archived_at || null,
+      cap.recipe_data || null, cap.created_at
+    );
+  }
+  
   // Re-enable foreign keys
   db.pragma("foreign_keys = ON");
   

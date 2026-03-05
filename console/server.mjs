@@ -1400,6 +1400,322 @@ app.post("/api/comms/:id/snooze", requireMember, (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════
+// CAPTURE DOMAIN — Section 15 Full Implementation
+// ═══════════════════════════════════════════════════════════
+
+// --- GET /api/captures — Query captures with filters ---
+app.get("/api/captures", requireMember, (req, res) => {
+  const d = getDB();
+  const memberId = req.memberId;
+  const notebook = req.query.notebook;
+  const search = req.query.search;
+  const orgStatus = req.query.org_status;
+  const limit = parseInt(req.query.limit || "100", 10);
+  const groupBy = req.query.group_by;
+
+  try {
+    // Group by notebook (for sidebar counts)
+    if (groupBy === 'notebook') {
+      const counts = d.prepare(`
+        SELECT notebook, COUNT(*) as count
+        FROM cap_captures
+        WHERE member_id = ? AND archived = 0
+        GROUP BY notebook
+        ORDER BY notebook
+      `).all(memberId);
+      return res.json({ notebook_counts: counts });
+    }
+
+    // Regular query
+    let sql = "SELECT * FROM cap_captures WHERE member_id = ? AND archived = 0";
+    const params = [memberId];
+
+    if (notebook && notebook !== 'all') {
+      sql += " AND notebook = ?";
+      params.push(notebook);
+    }
+
+    if (orgStatus) {
+      sql += " AND triage_status = ?";
+      params.push(orgStatus);
+    }
+
+    if (search) {
+      // FTS5 search
+      const searchResults = d.prepare(`
+        SELECT rowid FROM cap_captures_fts WHERE cap_captures_fts MATCH ?
+      `).all(search);
+      const rowids = searchResults.map(r => r.rowid);
+      if (rowids.length > 0) {
+        sql += ` AND rowid IN (${rowids.join(',')})`;
+      } else {
+        return res.json({ captures: [] });
+      }
+    }
+
+    sql += " ORDER BY pinned DESC, created_at DESC LIMIT ?";
+    params.push(limit);
+
+    const captures = d.prepare(sql).all(...params);
+    res.json({ captures });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// --- GET /api/captures/stats — Capture counts and stats ---
+app.get("/api/captures/stats", requireMember, (req, res) => {
+  const d = getDB();
+  const memberId = req.memberId;
+  const today = todayET();
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+  try {
+    const total = d.prepare(
+      "SELECT COUNT(*) as count FROM cap_captures WHERE member_id = ? AND archived = 0"
+    ).get(memberId);
+
+    const inboxCount = d.prepare(
+      "SELECT COUNT(*) as count FROM cap_captures WHERE member_id = ? AND notebook = 'inbox' AND archived = 0"
+    ).get(memberId);
+
+    const recipes = d.prepare(
+      "SELECT COUNT(*) as count FROM cap_captures WHERE member_id = ? AND capture_type = 'recipe' AND archived = 0"
+    ).get(memberId);
+
+    const pinned = d.prepare(
+      "SELECT COUNT(*) as count FROM cap_captures WHERE member_id = ? AND pinned = 1 AND archived = 0"
+    ).get(memberId);
+
+    const last7d = d.prepare(
+      "SELECT COUNT(*) as count FROM cap_captures WHERE member_id = ? AND created_at >= ?"
+    ).get(memberId, sevenDaysAgo);
+
+    res.json({
+      total: total.count,
+      inbox_count: inboxCount.count,
+      recipes: recipes.count,
+      pinned: pinned.count,
+      last_7d: last7d.count,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// --- GET /api/captures/recipes — Recipe-specific query ---
+app.get("/api/captures/recipes", requireMember, (req, res) => {
+  const d = getDB();
+  const memberId = req.memberId;
+
+  try {
+    const recipes = d.prepare(`
+      SELECT * FROM cap_captures
+      WHERE member_id = ? AND capture_type = 'recipe' AND archived = 0
+      ORDER BY created_at DESC
+      LIMIT 50
+    `).all(memberId);
+
+    res.json({ recipes });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// --- POST /api/capture — Create new capture ---
+app.post("/api/capture", requireMember, guardedWrite("capture_create", (req, res) => {
+  const wdb = req.writeDB;
+  const memberId = req.memberId;
+  const { text, source, capture_type, notebook } = req.body;
+
+  if (!text) {
+    return res.status(400).json({ error: "text is required" });
+  }
+
+  // Generate ULID-style ID (simplified)
+  const captureId = `cap-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
+
+  try {
+    wdb.prepare(`
+      INSERT INTO cap_captures (
+        id, member_id, raw_text, title, source, capture_type, notebook, triage_status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      captureId,
+      memberId,
+      text,
+      text.slice(0, 100), // Simple title extraction
+      source || 'chat',
+      capture_type || 'note',
+      notebook || 'inbox',
+      'raw'
+    );
+
+    auditLog(wdb, "capture-create", JSON.stringify({ id: captureId, text: text.slice(0, 50) }), memberId);
+
+    res.json({ ok: true, id: captureId });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+}));
+
+// --- POST /api/captures/:id — Update capture ---
+app.post("/api/captures/:id", requireMember, guardedWrite("capture_update", (req, res) => {
+  const wdb = req.writeDB;
+  const memberId = req.memberId;
+  const captureId = req.params.id;
+  const updates = req.body;
+
+  try {
+    // Build dynamic UPDATE query
+    const fields = [];
+    const values = [];
+
+    if (updates.notebook !== undefined) {
+      fields.push("notebook = ?");
+      values.push(updates.notebook);
+    }
+    if (updates.pinned !== undefined) {
+      fields.push("pinned = ?");
+      values.push(updates.pinned ? 1 : 0);
+    }
+    if (updates.archived !== undefined) {
+      fields.push("archived = ?");
+      values.push(updates.archived ? 1 : 0);
+      if (updates.archived) {
+        fields.push("archived_at = datetime('now')");
+      }
+    }
+    if (updates.org_status !== undefined) {
+      fields.push("triage_status = ?");
+      values.push(updates.org_status);
+    }
+
+    if (fields.length === 0) {
+      return res.status(400).json({ error: "No valid fields to update" });
+    }
+
+    fields.push("updated_at = datetime('now')");
+    values.push(captureId, memberId);
+
+    const sql = `UPDATE cap_captures SET ${fields.join(', ')} WHERE id = ? AND member_id = ?`;
+    wdb.prepare(sql).run(...values);
+
+    auditLog(wdb, "capture-update", JSON.stringify({ id: captureId, updates }), memberId);
+
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+}));
+
+// --- POST /api/captures/:id/confirm — Mark as organized ---
+app.post("/api/captures/:id/confirm", requireMember, guardedWrite("capture_confirm", (req, res) => {
+  const wdb = req.writeDB;
+  const memberId = req.memberId;
+  const captureId = req.params.id;
+
+  try {
+    wdb.prepare(`
+      UPDATE cap_captures
+      SET triage_status = 'organized', last_organized_at = datetime('now'), updated_at = datetime('now')
+      WHERE id = ? AND member_id = ?
+    `).run(captureId, memberId);
+
+    auditLog(wdb, "capture-confirm", JSON.stringify({ id: captureId }), memberId);
+
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+}));
+
+// --- POST /api/captures/:id/made-it — Mark recipe as made ---
+app.post("/api/captures/:id/made-it", requireMember, guardedWrite("capture_made_it", (req, res) => {
+  const wdb = req.writeDB;
+  const memberId = req.memberId;
+  const captureId = req.params.id;
+
+  try {
+    // Get current recipe_data
+    const capture = wdb.prepare("SELECT recipe_data FROM cap_captures WHERE id = ? AND member_id = ?").get(captureId, memberId);
+    if (!capture) {
+      return res.status(404).json({ error: "Capture not found" });
+    }
+
+    let recipeData = capture.recipe_data ? JSON.parse(capture.recipe_data) : {};
+    recipeData.made_count = (recipeData.made_count || 0) + 1;
+    recipeData.last_made_at = new Date().toISOString();
+
+    wdb.prepare(`
+      UPDATE cap_captures
+      SET recipe_data = ?, updated_at = datetime('now')
+      WHERE id = ? AND member_id = ?
+    `).run(JSON.stringify(recipeData), captureId, memberId);
+
+    auditLog(wdb, "capture-made-it", JSON.stringify({ id: captureId, made_count: recipeData.made_count }), memberId);
+
+    res.json({ ok: true, made_count: recipeData.made_count });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+}));
+
+// --- GET /api/settings/captures — Capture settings ---
+app.get("/api/settings/captures", requireMember, (req, res) => {
+  const d = getDB();
+
+  try {
+    // Read capture config
+    const configRows = d.prepare("SELECT key, value FROM pib_config WHERE key LIKE 'capture_%'").all();
+    const config = {};
+    for (const row of configRows) {
+      const key = row.key.replace('capture_', '');
+      config[key] = row.value === '1' || row.value === 'true' ? true : row.value;
+    }
+
+    // List of capture adapters (static for now)
+    const adapters = [
+      { id: 'chat', name: 'Chat', enabled: true, last_capture: null },
+      { id: 'voice', name: 'Voice', enabled: true, last_capture: null },
+      { id: 'sms', name: 'SMS', enabled: false, last_capture: null },
+      { id: 'email', name: 'Email', enabled: false, last_capture: null },
+    ];
+
+    res.json({ config, adapters });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// --- POST /api/settings/captures/adapter/:source — Toggle adapter ---
+app.post("/api/settings/captures/adapter/:source", requireMember, guardedWrite("capture_adapter_toggle", (req, res) => {
+  const wdb = req.writeDB;
+  const memberId = req.memberId;
+  const source = req.params.source;
+
+  try {
+    const configKey = `capture_adapter_${source}_enabled`;
+
+    // Toggle the config value
+    const current = wdb.prepare("SELECT value FROM pib_config WHERE key = ?").get(configKey);
+    const newValue = current?.value === '1' ? '0' : '1';
+
+    wdb.prepare(`
+      INSERT INTO pib_config (key, value, updated_by)
+      VALUES (?, ?, ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_by = excluded.updated_by, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')
+    `).run(configKey, newValue, memberId);
+
+    auditLog(wdb, "capture-adapter-toggle", JSON.stringify({ source, enabled: newValue === '1' }), memberId);
+
+    res.json({ ok: true, enabled: newValue === '1' });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+}));
+
+// ═══════════════════════════════════════════════════════════
 // BRIDGE ENDPOINTS — Sensor Ingest, BlueBubbles Webhooks, Task Capture
 // ═══════════════════════════════════════════════════════════
 

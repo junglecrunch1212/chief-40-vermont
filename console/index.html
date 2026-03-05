@@ -81,6 +81,16 @@ tbody tr:hover{background:var(--bg-hover)}
 .dot-current{background:var(--pink);width:14px;height:14px;animation:pulse 2s infinite}
 .dot-urgent{background:var(--err)}
 .dot-pending{background:var(--bd2)}
+.dot-capture{background:var(--warn)}
+.badge-cap{background:var(--warn-bg);color:#B8943D}
+.nb-btn{padding:10px 14px;border:1px solid var(--bd);border-radius:8px;background:transparent;font-size:13px;color:var(--tx2);cursor:pointer;transition:all .15s;white-space:nowrap}
+.nb-btn.active{background:var(--pink-bg);border-color:var(--pink);color:var(--pink);font-weight:600}
+.nb-btn:hover:not(.active){background:var(--bg-hover)}
+.recipe-accent{border-left:3px solid var(--teal);background:var(--teal-bg)}
+.triage-card{background:var(--bg-card);border:1px solid var(--bd);border-radius:var(--r);padding:24px;margin-bottom:16px;box-shadow:var(--shc)}
+.sort-btn{padding:14px 18px;border:2px solid var(--bd);border-radius:10px;background:var(--bg-card);font-size:14px;font-weight:500;color:var(--tx2);cursor:pointer;transition:all .2s;text-align:center}
+.sort-btn:hover{border-color:var(--pink);transform:translateY(-2px);box-shadow:0 4px 12px rgba(232,160,191,0.2)}
+.sort-btn.selected{border-color:var(--pink);background:var(--pink);color:#fff;box-shadow:0 4px 12px rgba(232,160,191,0.3)}
 .tv-scoreboard{background:#1A1714;color:#F5F0EA;min-height:100vh;padding:60px;font-size:18px}
 .tv-scoreboard .huge{font-size:72px;font-weight:700;font-family:var(--head)}
 .tv-scoreboard .big{font-size:48px;font-weight:600}
@@ -98,6 +108,12 @@ tbody tr:hover{background:var(--bg-hover)}
   <main class="main" id="main"></main>
 </div>
 <script>
+window.onerror = function(msg,url,line,col,err) {
+  document.body.innerHTML = '<pre style="padding:20px;color:red;font-size:14px">JS ERROR: '+msg+'\nLine: '+line+'\nCol: '+col+'\n'+(err?err.stack:'')+'</pre>';
+};
+window.addEventListener('unhandledrejection', function(e) {
+  document.body.innerHTML = '<pre style="padding:20px;color:red;font-size:14px">UNHANDLED PROMISE: '+e.reason+'</pre>';
+});
 // ── State ──
 const MEMBERS = [
   { id:'m-james', name:'James', role:'parent', emoji:'\uD83D\uDCAA', viewMode:'carousel' },
@@ -110,15 +126,17 @@ const NAV = [
   { id:'schedule', icon:'calendar', label:'Schedule' },
   { id:'lists', icon:'list', label:'Lists' },
   { id:'comms', icon:'inbox', label:'Comms' },
+  { id:'captures', icon:'book-open', label:'Captures' },
   { id:'chat', icon:'message-circle', label:'Chat' },
   { id:'scoreboard', icon:'trophy', label:'Scoreboard' },
   { id:'people', icon:'users', label:'People' },
   { id:'settings', icon:'settings', label:'Settings' },
 ];
-const HIDDEN_FOR_CHILD = ['tasks','people','settings'];
-const DOMAIN_BADGE = {household:'badge-lav',health:'badge-teal',finance:'badge-warn',family:'badge-pink',work:'badge-info',admin:'badge-grn'};
-const SETTINGS_TABS = ['health','costs','models','sources','phases','config','budget','household','permissions','coaching','gates','memory'];
-const SETTINGS_LABELS = {health:'System Health',costs:'Costs',models:'AI Models',sources:'Sources',phases:'Life Phases',config:'Config',budget:'Budget',household:'Household',permissions:'Permissions',coaching:'Coaching',gates:'Gates',memory:'Memory'};
+const HIDDEN_FOR_CHILD = ['tasks','people','settings','captures'];
+const DOMAIN_BADGE = {household:'badge-lav',health:'badge-teal',finance:'badge-warn',family:'badge-pink',work:'badge-info',admin:'badge-grn',capture:'badge-warn'};
+const ADAPTER_BADGE = {email:'badge-pink',imessage:'badge-lav',sms:'badge-teal',whatsapp:'badge-grn',voice:'badge-warn',webhook:'badge-info',manual:'badge-err'};
+const SETTINGS_TABS = ['health','costs','models','sources','phases','config','budget','household','permissions','coaching','gates','channels','memory','captures'];
+const SETTINGS_LABELS = {health:'System Health',costs:'Costs',models:'AI Models',sources:'Sources',phases:'Life Phases',config:'Config',budget:'Budget',household:'Household',permissions:'Permissions',coaching:'Coaching',gates:'Gates',channels:'Channels',memory:'Memory',captures:'Captures'};
 
 let currentPage = 'today';
 let currentActor = localStorage.getItem('pib-actor') || 'm-james';
@@ -129,13 +147,14 @@ let chatStreaming = false;
 let degradedMode = false;
 let lastKnownData = {};
 let streamIndex = 0;
+let capturesNotebook = 'all';
+let capturesView = 'browse';
+let capturesSearch = '';
+let triageIndex = 0;
+let captureBadge = 0;
 
-// Check for hash-based routing (TV scoreboard)
-if (window.location.hash === '#scoreboard' || window.location.hash === '#/scoreboard') {
-  renderTVScoreboard();
-} else {
-  initApp();
-}
+// Boot is deferred to end of script (after all const declarations)
+// See bottom of file for: initApp() / renderTVScoreboard()
 
 function initApp() {
   renderSidebar();
@@ -157,6 +176,14 @@ function initApp() {
         document.getElementById('degraded-warn').style.display='flex'; 
       } 
     }
+  }, 300000); // 5 min
+  // Capture badge polling
+  setInterval(async()=>{
+    try {
+      const stats = await GET(`/api/captures/stats?member=${currentActor}`);
+      captureBadge = stats.inbox_count || 0;
+      renderSidebar();
+    } catch(e) { /* ignore */ }
   }, 300000); // 5 min
 }
 
@@ -182,6 +209,7 @@ const ICONS = {
   trophy:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>',
   users:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
   inbox:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>',
+  'book-open':'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>',
   settings:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
 };
 
@@ -247,8 +275,9 @@ function renderSidebar() {
   
   for (const n of NAV) {
     if (isChild && HIDDEN_FOR_CHILD.includes(n.id)) continue;
+    const badge = n.id === 'captures' && captureBadge > 0 ? `<span style="background:var(--warn);color:#fff;font-size:10px;font-weight:700;padding:2px 6px;border-radius:10px;margin-left:4px">${captureBadge}</span>` : '';
     h += `<button class="nav-btn ${n.id===currentPage?'active':''}" onclick="navigate('${n.id}')">
-      <span class="nav-icon">${ICONS[n.icon]||''}${n.label}</span>
+      <span class="nav-icon">${ICONS[n.icon]||''}${n.label}${badge}</span>
     </button>`;
   }
   h += `</div>
@@ -302,6 +331,7 @@ function renderPage() {
     schedule:renderSchedule,
     lists:renderLists,
     comms:renderComms,
+    captures:renderCaptures,
     chat:renderChat,
     scoreboard:renderScoreboard,
     people:renderPeople,
@@ -337,12 +367,13 @@ async function renderTodayJames() {
       return eventTime > now && eventTime <= twoHoursLater;
     }).slice(0, 3);
     
-    // Progress dots with 6 states
+    // Progress dots with 7 states (added dot-capture)
     const dots = stream.map((s,i) => {
       let cls = 'dot-pending';
       if (s.state === 'done') cls = s.type === 'endowed' ? 'dot-endowed' : 'dot-done';
       else if (s.state === 'skipped') cls = 'dot-skipped';
       else if (i === activeIdx) cls = 'dot-current';
+      else if (s.type === 'capture_inbox') cls = 'dot-capture';
       else if (s.urgent || (s.type==='task' && s.task?.urgent)) cls = 'dot-urgent';
       return `<div class="dot ${cls}" onclick="streamIndex=${i};renderPage()" title="${esc(s.label||s.title||'')}"></div>`;
     }).join('');
@@ -383,6 +414,7 @@ async function renderTodayJames() {
               <div style="font-size:20px;font-weight:600;line-height:1.3;margin-bottom:8px">${esc(currentItem.title||currentItem.label||'')}</div>
               ${currentItem.type==='task' && currentItem.task?.domain ? `<span class="badge ${DOMAIN_BADGE[currentItem.task.domain]||'badge-info'}">${esc(currentItem.task.domain)}</span>` : ''}
               ${currentItem.type==='calendar' ? `<div style="font-size:13px;color:var(--tx3);margin-top:4px">📅 ${esc(currentItem.time||'')} – ${esc(currentItem.end||'')}</div>` : ''}
+              ${currentItem.type==='capture_inbox' ? `<div style="font-size:13px;color:var(--tx3);margin-top:4px">📝 New capture needs organization</div>` : ''}
               ${currentItem.type==='task' && currentItem.task?.effort ? `<span class="badge badge-lav" style="margin-left:6px">${esc(currentItem.task.effort)}</span>` : ''}
             </div>
             ${currentItem.type==='task' && currentItem.task?.points ? `<div style="font-size:24px;font-weight:700;color:var(--pink);font-family:var(--head)">+${currentItem.task.points}</div>` : ''}
@@ -727,15 +759,309 @@ async function renderLists() {
 }
 
 // ── COMMS ──
+let commsFilter = 'all';
+let commsChannelFilter = null;
+let commsIdentityPicker = null;
+
 async function renderComms() {
   const m = document.getElementById('main');
-  m.innerHTML = `<div class="fi"><h1 class="page-title">Comms Inbox</h1><div class="card-flat" style="text-align:center;padding:48px;color:var(--tx3)">Comms feature coming soon. See API contract for endpoint shapes.</div></div>`;
+  
+  async function load() {
+    m.innerHTML = loading('Loading comms...');
+    try {
+      // Fetch channels with member access
+      const channelsData = await GET(`/api/channels/member/${currentActor}`);
+      const channels = channelsData.channels || [];
+      
+      // Fetch counts for badge
+      const countsData = await GET(`/api/comms/counts`);
+      const counts = countsData || {};
+      
+      // Fetch inbox items
+      let url = `/api/comms/inbox`;
+      const params = [];
+      if (commsChannelFilter) params.push(`channel=${commsChannelFilter}`);
+      if (commsFilter && commsFilter !== 'all') {
+        if (commsFilter === 'needs_response') params.push('needs_response=true');
+        else if (commsFilter === 'urgent') params.push('response_urgency=urgent&needs_response=true');
+        else if (commsFilter === 'drafts') params.push('draft_status=pending');
+        else if (commsFilter === 'snoozed') params.push('snoozed=true');
+      }
+      if (params.length) url += '?' + params.join('&');
+      
+      const inboxData = await GET(url);
+      const items = inboxData.items || [];
+      
+      // Group channels by category
+      const channelsByCategory = {
+        bidirectional: channels.filter(c => c.category === 'conversational'),
+        inbound: channels.filter(c => c.category === 'broadcast'),
+        privileged: channels.filter(c => c.access_level === 'admin'),
+        capture: channels.filter(c => c.category === 'capture'),
+      };
+      
+      // Group items by batch window within urgency
+      const itemsByUrgency = {
+        urgent: items.filter(i => i.response_urgency === 'urgent'),
+        timely: items.filter(i => i.response_urgency === 'timely'),
+        normal: items.filter(i => i.response_urgency === 'normal' || !i.response_urgency),
+      };
+      
+      m.innerHTML = `<div class="fi" style="display:flex;gap:20px">
+        <!-- Channel Sidebar -->
+        <div style="width:240px;flex-shrink:0">
+          <h2 style="font-size:18px;font-weight:600;font-family:var(--head);margin-bottom:16px">Channels</h2>
+          
+          ${Object.entries(channelsByCategory).map(([cat, chans]) => chans.length ? `
+            <div style="margin-bottom:20px">
+              <div style="font-size:11px;font-weight:600;color:var(--tx3);letter-spacing:.5px;text-transform:uppercase;margin-bottom:8px">${esc(cat)}</div>
+              ${chans.map(ch => `
+                <div onclick="window._filterChannel('${esc(ch.id)}')" 
+                     style="padding:8px 12px;border-radius:8px;margin-bottom:4px;cursor:pointer;border:1px solid ${commsChannelFilter===ch.id?'var(--pink)':'transparent'};background:${commsChannelFilter===ch.id?'var(--pink-bg)':'transparent'};transition:all .15s"
+                     onmouseover="this.style.background='var(--bg-hover)'" 
+                     onmouseout="this.style.background='${commsChannelFilter===ch.id?'var(--pink-bg)':'transparent'}'">
+                  <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+                    <span style="font-size:16px">${esc(ch.icon || '💬')}</span>
+                    <span style="font-size:13px;font-weight:500;flex:1">${esc(ch.display_name)}</span>
+                    <div style="width:6px;height:6px;border-radius:50%;background:${ch.health_status==='active'?'var(--grn)':ch.health_status==='degraded'?'var(--warn)':'var(--err)'};flex-shrink:0"></div>
+                  </div>
+                  <div style="display:flex;align-items:center;gap:6px;font-size:11px">
+                    <span class="badge ${ADAPTER_BADGE[ch.adapter_id] || 'badge-info'}" style="font-size:10px;padding:2px 6px">${esc(ch.adapter_id || '')}</span>
+                    <span class="badge badge-${ch.access_level==='admin'?'pink':ch.access_level==='write'?'lav':'teal'}" style="font-size:10px;padding:2px 6px">${esc(ch.access_level || 'read')}</span>
+                    ${(counts.by_channel && counts.by_channel[ch.id]) ? `<span style="color:var(--pink);font-weight:600">${counts.by_channel[ch.id]}</span>` : ''}
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          ` : '').join('')}
+        </div>
+        
+        <!-- Main Inbox -->
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+            <h1 class="page-title" style="margin-bottom:0">Comms Inbox</h1>
+            <div style="display:flex;align-items:center;gap:8px">
+              <span id="comms-badge" class="badge badge-pink">${counts.needs_response || 0} need response</span>
+              ${counts.urgent > 0 ? `<span class="badge badge-err">${counts.urgent} urgent</span>` : ''}
+            </div>
+          </div>
+          
+          <div class="pill-tabs" style="margin-bottom:20px">
+            ${['all','needs_response','urgent','drafts','snoozed'].map(f => `
+              <button class="pill ${f===commsFilter?'active':''}" onclick="window._filterComms('${f}')">
+                ${f.replace(/_/g,' ')}
+                ${f==='drafts'&&counts.drafts_pending>0?` (${counts.drafts_pending})`:f==='urgent'&&counts.urgent>0?` (${counts.urgent})`:''}
+              </button>
+            `).join('')}
+          </div>
+          
+          ${items.length === 0 ? `
+            <div class="card-flat" style="text-align:center;padding:60px;color:var(--tx3)">
+              <div style="font-size:48px;margin-bottom:16px">📭</div>
+              <div style="font-size:16px;font-weight:500;margin-bottom:8px">No messages</div>
+              <div style="font-size:14px">
+                ${commsFilter === 'all' ? 'Your inbox is empty.' : 
+                  commsFilter === 'needs_response' ? 'No messages need a response.' :
+                  commsFilter === 'urgent' ? 'No urgent messages.' :
+                  commsFilter === 'drafts' ? 'No pending drafts.' :
+                  'No snoozed messages.'}
+              </div>
+            </div>
+          ` : `
+            <!-- Urgency Groups -->
+            ${Object.entries(itemsByUrgency).map(([urgency, urgentItems]) => urgentItems.length ? `
+              <div style="margin-bottom:24px">
+                <div style="font-size:12px;font-weight:600;color:var(--tx3);letter-spacing:.5px;text-transform:uppercase;margin-bottom:12px;display:flex;align-items:center;gap:8px">
+                  ${urgency === 'urgent' ? '🔴' : urgency === 'timely' ? '🟡' : '⚪'} ${urgency}
+                </div>
+                
+                <!-- Cards within urgency -->
+                ${urgentItems.map(item => {
+                  const isDraft = item.draft_status === 'pending';
+                  const isMetadataOnly = item.access_level === 'metadata';
+                  
+                  return `
+                    <div class="card" style="margin-bottom:12px;${isDraft?'border-left:4px solid var(--lav)':''}">
+                      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
+                        <div style="flex:1">
+                          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+                            <span style="font-size:16px">${esc(item.channel_icon || '💬')}</span>
+                            <span style="font-weight:600;font-size:15px">${isMetadataOnly ? '[Private]' : esc(item.summary || item.subject || 'No subject')}</span>
+                            ${isDraft ? '<span class="badge badge-lav" style="font-size:11px">DRAFT</span>' : ''}
+                          </div>
+                          
+                          ${!isMetadataOnly && item.subject ? `
+                            <div style="font-size:13px;color:var(--tx3);margin-bottom:4px">Subject: ${esc(item.subject)}</div>
+                          ` : ''}
+                          
+                          ${!isMetadataOnly && item.body_snippet ? `
+                            <div style="font-size:14px;color:var(--tx2);line-height:1.5;margin-bottom:8px">${esc(item.body_snippet)}</div>
+                          ` : ''}
+                          
+                          ${isMetadataOnly ? `
+                            <div style="font-size:13px;color:var(--tx3);padding:12px;background:var(--bg-input);border-radius:8px;margin-bottom:8px">
+                              🔒 Metadata-only access — content hidden for privacy
+                            </div>
+                          ` : ''}
+                          
+                          ${isDraft && item.draft_response ? `
+                            <div id="draft-${esc(item.id)}" style="background:var(--lav-bg);border:1px solid var(--lav);border-radius:8px;padding:12px;margin-bottom:8px;position:relative">
+                              <div style="font-size:11px;font-weight:600;color:var(--lav);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Draft Response</div>
+                              <div contenteditable="true" style="font-size:14px;line-height:1.6;outline:none;min-height:60px">${esc(item.draft_response)}</div>
+                              <div style="font-size:12px;color:var(--tx3);margin-top:8px;font-style:italic">
+                                as ${MEMBERS.find(m=>m.id===currentActor)?.name || 'You'} (Personal) via ${esc(item.channel_name || 'Channel')}
+                              </div>
+                            </div>
+                          ` : ''}
+                          
+                          <div style="font-size:12px;color:var(--tx3)">
+                            <span>${esc(item.channel_name || 'Unknown')}</span> &middot; 
+                            <span>${esc(item.created_at || '')}</span>
+                            ${item.batch_window ? ` &middot; <span>Batch: ${esc(item.batch_window)}</span>` : ''}
+                          </div>
+                        </div>
+                      </div>
+                      
+                      <!-- Actions -->
+                      <div style="display:flex;gap:8px;flex-wrap:wrap">
+                        ${isDraft ? `
+                          <button class="btn-g btn-sm" onclick="window._sendDraft('${esc(item.id)}')">✅ Send</button>
+                          <button class="btn-d btn-sm" onclick="window._rejectDraft('${esc(item.id)}')">❌ Reject</button>
+                        ` : !isMetadataOnly && item.needs_response ? `
+                          <button class="btn-p btn-sm" onclick="window._draftReply('${esc(item.id)}')">✍️ Draft</button>
+                          <button class="btn-s btn-sm" onclick="window._archiveComm('${esc(item.id)}')">Archive</button>
+                          <button class="btn-s btn-sm" onclick="window._snoozeComm('${esc(item.id)}')">⏰ Snooze</button>
+                        ` : `
+                          <button class="btn-s btn-sm" onclick="window._archiveComm('${esc(item.id)}')">Archive</button>
+                        `}
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            ` : '').join('')}
+          `}
+        </div>
+      </div>
+      
+      <!-- Identity Picker Modal (hidden until needed) -->
+      <div id="identity-picker-modal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center">
+        <div class="card" style="max-width:500px;margin:20px">
+          <h3 style="font-size:18px;font-weight:600;font-family:var(--head);margin-bottom:16px">Choose Identity</h3>
+          <p style="font-size:14px;color:var(--tx2);margin-bottom:16px">This message requires choosing an outbound identity:</p>
+          <div id="identity-picker-options" style="display:grid;gap:8px;margin-bottom:16px"></div>
+          <div style="display:flex;gap:8px;justify-content:flex-end">
+            <button class="btn-s" onclick="window._closeIdentityPicker()">Cancel</button>
+          </div>
+        </div>
+      </div>`;
+      
+      // Set badge refresh
+      if (!window.commsBadgeInterval) {
+        window.commsBadgeInterval = setInterval(async () => {
+          try {
+            const c = await GET('/api/comms/counts');
+            const badge = document.getElementById('comms-badge');
+            if (badge) badge.textContent = `${c.needs_response || 0} need response`;
+          } catch(e) { console.error(e); }
+        }, 60000); // 60s
+      }
+      
+    } catch(e) {
+      m.innerHTML = `<div class="fi"><h1 class="page-title">Comms Inbox</h1><div class="card-flat" style="text-align:center;padding:48px;color:var(--tx3)">Could not load inbox. ${esc(e.message)}</div></div>`;
+    }
+  }
+  
+  // Action handlers
+  window._filterComms = (filter) => { commsFilter = filter; load(); };
+  window._filterChannel = (channelId) => { commsChannelFilter = commsChannelFilter === channelId ? null : channelId; load(); };
+  
+  window._draftReply = async (id) => {
+    try {
+      await POST(`/api/comms/${id}/draft`, {});
+      load();
+    } catch(e) { alert('Draft generation requires LLM integration'); }
+  };
+  
+  window._sendDraft = async (id) => {
+    const draftDiv = document.getElementById(`draft-${id}`);
+    const editedText = draftDiv?.querySelector('[contenteditable]')?.textContent;
+    try {
+      const res = await POST(`/api/comms/${id}/send`, editedText ? { edited_text: editedText } : {});
+      if (res.identity_unresolved) {
+        commsIdentityPicker = { id, text: editedText, identities: res.available_identities || [] };
+        showIdentityPicker();
+      } else {
+        load();
+      }
+    } catch(e) { alert('Send failed: ' + e.message); }
+  };
+  
+  window._rejectDraft = async (id) => {
+    if (!confirm('Reject this draft?')) return;
+    try {
+      await POST(`/api/comms/${id}/reject`, {});
+      load();
+    } catch(e) { alert('Reject failed: ' + e.message); }
+  };
+  
+  window._archiveComm = async (id) => {
+    try {
+      await POST(`/api/comms/${id}/archive`, {});
+      load();
+    } catch(e) { alert('Archive failed: ' + e.message); }
+  };
+  
+  window._snoozeComm = async (id) => {
+    const until = prompt('Snooze until (YYYY-MM-DD):');
+    if (!until) return;
+    try {
+      await POST(`/api/comms/${id}/snooze`, { until });
+      load();
+    } catch(e) { alert('Snooze failed: ' + e.message); }
+  };
+  
+  function showIdentityPicker() {
+    const modal = document.getElementById('identity-picker-modal');
+    const options = document.getElementById('identity-picker-options');
+    if (!modal || !options || !commsIdentityPicker) return;
+    
+    options.innerHTML = commsIdentityPicker.identities.map(ident => `
+      <button class="btn-s" style="padding:12px;text-align:left;justify-content:flex-start" 
+              onclick="window._selectIdentity('${esc(ident.id)}')">
+        <div style="font-weight:500">${esc(ident.name)}</div>
+        <div style="font-size:12px;color:var(--tx3)">${esc(ident.channel)} &middot; ${esc(ident.address)}</div>
+      </button>
+    `).join('');
+    
+    modal.style.display = 'flex';
+  }
+  
+  window._selectIdentity = async (identId) => {
+    if (!commsIdentityPicker) return;
+    try {
+      await POST(`/api/comms/${commsIdentityPicker.id}/send`, { 
+        edited_text: commsIdentityPicker.text,
+        identity_id: identId 
+      });
+      window._closeIdentityPicker();
+      load();
+    } catch(e) { alert('Send failed: ' + e.message); }
+  };
+  
+  window._closeIdentityPicker = () => {
+    const modal = document.getElementById('identity-picker-modal');
+    if (modal) modal.style.display = 'none';
+    commsIdentityPicker = null;
+  };
+  
+  load();
 }
 
 // ── CHAT (with SSE streaming) ──
 function renderChat() {
   const m = document.getElementById('main');
-  const chips = ['today','now','grocery list','schedule','status','diff','help'];
+  const chips = ['today','now','grocery list','schedule','status','capture:','recipe:','diff','help'];
   function draw() {
     m.innerHTML = `<div class="fi" style="display:flex;flex-direction:column;height:calc(100vh - 56px);max-width:700px;margin:0 auto">
       <h1 class="page-title" style="flex-shrink:0">Chat with Poopsy</h1>
@@ -960,6 +1286,268 @@ async function renderTVScoreboard() {
   setInterval(refresh, 60000); // Refresh every 60s
 }
 
+// ── CAPTURES ──
+function _timeAgo(dateStr) {
+  const now = new Date();
+  const then = new Date(dateStr);
+  const diffMs = now - then;
+  const diffMins = Math.floor(diffMs / 60000);
+  if (diffMins < 1) return 'just now';
+  if (diffMins < 60) return `${diffMins}m ago`;
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays < 7) return `${diffDays}d ago`;
+  const diffWeeks = Math.floor(diffDays / 7);
+  if (diffWeeks < 4) return `${diffWeeks}w ago`;
+  const diffMonths = Math.floor(diffDays / 30);
+  return `${diffMonths}mo ago`;
+}
+
+function renderCaptureCard(cap) {
+  const typeIcon = {
+    note:'📝', idea:'💡', recipe:'🍽️', bookmark:'🔖', quote:'💬',
+    log:'📊', snippet:'📎', question:'❓', reference:'📚'
+  }[cap.capture_type] || '📄';
+  
+  const orgStatus = {
+    raw:'⏳ Raw', triaged:'✓ Triaged', organized:'✅ Organized', failed:'❌ Failed'
+  }[cap.triage_status] || '';
+  
+  const snippet = (cap.body || cap.raw_text || '').slice(0, 150) + ((cap.body || cap.raw_text || '').length > 150 ? '...' : '');
+  const tags = cap.tags ? JSON.parse(cap.tags) : [];
+  
+  return `<div class="card" style="margin-bottom:12px;position:relative">
+    ${cap.pinned ? '<div style="position:absolute;top:12px;right:12px;font-size:18px">📌</div>' : ''}
+    <div style="display:flex;align-items:flex-start;gap:12px;margin-bottom:10px">
+      <span style="font-size:24px">${typeIcon}</span>
+      <div style="flex:1">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+          <span class="badge badge-cap">${esc(cap.notebook)}</span>
+          ${orgStatus ? `<span style="font-size:11px;color:var(--tx3)">${orgStatus}</span>` : ''}
+        </div>
+        <div style="font-size:16px;font-weight:600;margin-bottom:6px">${esc(cap.title || 'Untitled')}</div>
+        <p style="font-size:14px;color:var(--tx2);line-height:1.5;margin-bottom:8px">${esc(snippet)}</p>
+        ${tags.length > 0 ? `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px">${tags.map(t => `<span class="badge badge-info" style="font-size:10px">${esc(t)}</span>`).join('')}</div>` : ''}
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span style="font-size:12px;color:var(--tx4)">${_timeAgo(cap.created_at)}</span>
+          <div style="display:flex;gap:6px">
+            <button class="btn-s btn-sm" onclick="window._capPin('${esc(cap.id)}',${!cap.pinned})">${cap.pinned ? 'Unpin' : 'Pin'}</button>
+            <button class="btn-s btn-sm" onclick="window._capMove('${esc(cap.id)}')">Move</button>
+            <button class="btn-s btn-sm" onclick="window._capArchive('${esc(cap.id)}')">${cap.archived ? 'Unarchive' : 'Archive'}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderRecipeCard(cap) {
+  const recipeData = cap.recipe_data ? JSON.parse(cap.recipe_data) : {};
+  const rating = recipeData.rating || 0;
+  const stars = '★'.repeat(rating) + '☆'.repeat(5 - rating);
+  const madeIt = recipeData.made_count > 0;
+  const kidApproved = recipeData.kid_approved;
+  
+  return `<div class="card recipe-accent" style="margin-bottom:12px">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
+      <div style="flex:1">
+        <div style="font-size:18px;font-weight:600;margin-bottom:4px">${esc(cap.title || 'Untitled Recipe')}</div>
+        ${rating > 0 ? `<div style="color:var(--warn);font-size:14px;margin-bottom:4px">${stars}</div>` : ''}
+        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">
+          ${kidApproved ? '<span class="badge badge-pink">👶 Kid Approved</span>' : ''}
+          ${recipeData.difficulty ? `<span class="badge badge-lav">${esc(recipeData.difficulty)}</span>` : ''}
+          ${recipeData.meal_type ? `<span class="badge badge-teal">${esc(recipeData.meal_type)}</span>` : ''}
+          ${recipeData.cuisine ? `<span class="badge badge-info">${esc(recipeData.cuisine)}</span>` : ''}
+        </div>
+        ${recipeData.prep_min || recipeData.cook_min ? `<div style="font-size:13px;color:var(--tx3)">⏱️ Prep: ${recipeData.prep_min || 0}m • Cook: ${recipeData.cook_min || 0}m</div>` : ''}
+      </div>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn-p btn-sm" onclick="window._capMadeIt('${esc(cap.id)}')">${madeIt ? 'Made It Again!' : 'Made It'}</button>
+      <button class="btn-s btn-sm" onclick="window._capMove('${esc(cap.id)}')">Move</button>
+    </div>
+  </div>`;
+}
+
+function renderRecipeFilters(activeFilters) {
+  const filters = [
+    { id: 'kid_approved', label: '👶 Kid Approved' },
+    { id: 'never_made', label: '🆕 Never Made' },
+    { id: 'easy', label: '✨ Easy' },
+    { id: 'dinner', label: '🌙 Dinner' },
+    { id: 'breakfast', label: '🌅 Breakfast' },
+  ];
+  return `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px">
+    ${filters.map(f => `<button class="pill ${activeFilters.includes(f.id) ? 'active' : ''}" onclick="window._capToggleFilter('${f.id}')">${f.label}</button>`).join('')}
+  </div>`;
+}
+
+function renderTriageView(captures) {
+  if (!captures || captures.length === 0) {
+    return `<div style="text-align:center;padding:60px;color:var(--tx3)">
+      <div style="font-size:48px;margin-bottom:16px">✅</div>
+      <div style="font-size:18px;font-weight:600;margin-bottom:8px">All caught up!</div>
+      <div style="font-size:14px">No captures need triaging</div>
+    </div>`;
+  }
+  
+  const cap = captures[triageIndex] || captures[0];
+  const progress = Math.round(((triageIndex + 1) / captures.length) * 100);
+  
+  const notebooks = [
+    { slug: 'inbox', name: '📥 Inbox', desc: 'Unsorted' },
+    { slug: 'kitchen', name: '🍽️ Kitchen', desc: 'Recipes & meal planning' },
+    { slug: 'ideas', name: '💡 Ideas', desc: 'Creative thoughts' },
+    { slug: 'reference', name: '📚 Reference', desc: 'Info to keep' },
+    { slug: 'kids', name: '👶 Kids', desc: 'School & activities' },
+    { slug: 'home', name: '🏠 Home', desc: 'House & projects' },
+    { slug: 'health', name: '💊 Health', desc: 'Medical & wellness' },
+    { slug: 'work', name: '💼 Work', desc: 'Professional' },
+    { slug: 'money', name: '💰 Money', desc: 'Finance & bills' },
+    { slug: 'archive', name: '📦 Archive', desc: 'Old/done' },
+  ];
+  
+  return `<div>
+    <div style="margin-bottom:20px">
+      <div style="display:flex;justify-content:between;align-items:center;margin-bottom:8px">
+        <span style="font-size:13px;color:var(--tx3)">${triageIndex + 1} of ${captures.length}</span>
+        <span style="font-size:13px;color:var(--tx3)">${progress}% complete</span>
+      </div>
+      <div style="height:6px;background:var(--bg-input);border-radius:3px;overflow:hidden">
+        <div style="height:100%;width:${progress}%;background:var(--pink);border-radius:3px;transition:width .3s"></div>
+      </div>
+    </div>
+    
+    <div class="triage-card">
+      <div style="font-size:18px;font-weight:600;margin-bottom:12px">${esc(cap.title || 'Untitled')}</div>
+      <div style="font-size:14px;color:var(--tx2);line-height:1.6;margin-bottom:16px">${esc((cap.body || cap.raw_text || '').slice(0, 300))}</div>
+      <div style="font-size:12px;color:var(--tx4);margin-bottom:20px">${_timeAgo(cap.created_at)} • ${esc(cap.source)}</div>
+      
+      <div style="border-top:2px solid var(--bd);padding-top:20px">
+        <div style="font-size:13px;font-weight:600;color:var(--tx3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px">Sort into notebook</div>
+        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px">
+          ${notebooks.map(nb => `
+            <button class="sort-btn ${cap.notebook === nb.slug ? 'selected' : ''}" onclick="window._capConfirmOrg('${esc(cap.id)}','${nb.slug}')">
+              <div style="font-size:20px;margin-bottom:4px">${nb.name.split(' ')[0]}</div>
+              <div style="font-size:13px;font-weight:600">${nb.name.split(' ').slice(1).join(' ')}</div>
+              <div style="font-size:11px;opacity:.7">${nb.desc}</div>
+            </button>
+          `).join('')}
+        </div>
+      </div>
+    </div>
+    
+    <div style="display:flex;gap:10px;margin-top:16px">
+      <button class="btn-s" onclick="triageIndex=Math.max(0,triageIndex-1);renderPage()" ${triageIndex === 0 ? 'disabled' : ''}>← Previous</button>
+      <button class="btn-p" onclick="triageIndex=Math.min(${captures.length - 1},triageIndex+1);renderPage()" ${triageIndex >= captures.length - 1 ? 'disabled' : ''}>Next →</button>
+    </div>
+  </div>`;
+}
+
+async function renderCaptures() {
+  const m = document.getElementById('main');
+  m.innerHTML = loading('Loading captures...');
+  
+  try {
+    const [stats, notebooksData] = await Promise.all([
+      GET('/api/captures/stats'),
+      GET(`/api/captures?group_by=notebook&member=${currentActor}`)
+    ]);
+    
+    const notebookCounts = notebooksData.notebook_counts || [];
+    
+    // Render view switcher + sidebar + content
+    m.innerHTML = `<div class="fi">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+        <h1 class="page-title" style="margin-bottom:0">Captures</h1>
+        <button class="btn-p" onclick="window._capQuickCapture()">+ Quick Capture</button>
+      </div>
+      
+      <div class="pill-tabs" style="margin-bottom:20px">
+        <button class="pill ${capturesView === 'browse' ? 'active' : ''}" onclick="window._capView('browse')">📚 Browse</button>
+        <button class="pill ${capturesView === 'recipes' ? 'active' : ''}" onclick="window._capView('recipes')">🍽️ Recipes</button>
+        <button class="pill ${capturesView === 'triage' ? 'active' : ''}" onclick="window._capView('triage')">⏳ Triage (${stats.inbox_count || 0})</button>
+      </div>
+      
+      <div style="display:grid;grid-template-columns:220px 1fr;gap:20px">
+        <div id="cap-sidebar"></div>
+        <div id="cap-content"></div>
+      </div>
+    </div>`;
+    
+    // Render sidebar
+    const notebooks = [
+      { slug: 'all', name: 'All Captures', icon: '📚', count: stats.total || 0 },
+      { slug: 'inbox', name: 'Inbox', icon: '📥', count: notebookCounts.find(n => n.notebook === 'inbox')?.count || 0 },
+      { slug: 'kitchen', name: 'Kitchen', icon: '🍽️', count: notebookCounts.find(n => n.notebook === 'kitchen')?.count || 0 },
+      { slug: 'ideas', name: 'Ideas', icon: '💡', count: notebookCounts.find(n => n.notebook === 'ideas')?.count || 0 },
+      { slug: 'reference', name: 'Reference', icon: '📚', count: notebookCounts.find(n => n.notebook === 'reference')?.count || 0 },
+      { slug: 'kids', name: 'Kids', icon: '👶', count: notebookCounts.find(n => n.notebook === 'kids')?.count || 0 },
+      { slug: 'home', name: 'Home', icon: '🏠', count: notebookCounts.find(n => n.notebook === 'home')?.count || 0 },
+      { slug: 'health', name: 'Health', icon: '💊', count: notebookCounts.find(n => n.notebook === 'health')?.count || 0 },
+      { slug: 'work', name: 'Work', icon: '💼', count: notebookCounts.find(n => n.notebook === 'work')?.count || 0 },
+      { slug: 'money', name: 'Money', icon: '💰', count: notebookCounts.find(n => n.notebook === 'money')?.count || 0 },
+    ];
+    
+    document.getElementById('cap-sidebar').innerHTML = `<div>
+      <div style="margin-bottom:16px">
+        <input id="cap-search" placeholder="Search..." style="width:100%;font-size:13px" onkeydown="if(event.key==='Enter')window._capSearch()">
+      </div>
+      ${notebooks.map(nb => `
+        <button class="nb-btn ${capturesNotebook === nb.slug ? 'active' : ''}" style="width:100%;display:flex;justify-content:space-between;align-items:center;margin-bottom:4px" onclick="window._capNb('${nb.slug}')">
+          <span>${nb.icon} ${nb.name}</span>
+          <span style="font-size:11px;font-family:var(--mono);color:var(--tx4)">${nb.count}</span>
+        </button>
+      `).join('')}
+    </div>`;
+    
+    // Render content based on view
+    if (capturesView === 'browse') {
+      const filter = capturesNotebook === 'all' ? {} : { notebook: capturesNotebook };
+      if (capturesSearch) filter.search = capturesSearch;
+      const queryStr = new URLSearchParams(filter).toString();
+      const data = await GET(`/api/captures?${queryStr}&member=${currentActor}`);
+      const captures = data.captures || [];
+      
+      document.getElementById('cap-content').innerHTML = captures.length > 0
+        ? captures.map(c => renderCaptureCard(c)).join('')
+        : `<div style="text-align:center;padding:60px;color:var(--tx3)">No captures found</div>`;
+        
+    } else if (capturesView === 'recipes') {
+      const data = await GET(`/api/captures/recipes?member=${currentActor}`);
+      const recipes = data.recipes || [];
+      
+      document.getElementById('cap-content').innerHTML = `<div>
+        ${renderRecipeFilters([])}
+        ${recipes.length > 0
+          ? recipes.map(r => renderRecipeCard(r)).join('')
+          : `<div style="text-align:center;padding:60px;color:var(--tx3)">No recipes yet</div>`}
+      </div>`;
+      
+    } else if (capturesView === 'triage') {
+      const data = await GET(`/api/captures?org_status=raw&member=${currentActor}`);
+      const rawCaptures = data.captures || [];
+      triageIndex = Math.min(triageIndex, Math.max(0, rawCaptures.length - 1));
+      document.getElementById('cap-content').innerHTML = renderTriageView(rawCaptures);
+    }
+    
+  } catch (e) {
+    m.innerHTML = `<div class="fi"><h1 class="page-title">Captures</h1><div class="card-flat" style="text-align:center;padding:48px;color:var(--tx3)">Could not load captures: ${esc(e.message)}</div></div>`;
+  }
+}
+
+// Capture action handlers
+window._capView = (view) => { capturesView = view; triageIndex = 0; renderPage(); };
+window._capNb = (nb) => { capturesNotebook = nb; capturesView = 'browse'; renderPage(); };
+window._capSearch = () => { capturesSearch = document.getElementById('cap-search')?.value || ''; renderPage(); };
+window._capPin = async (id, pin) => { try { await POST(`/api/captures/${id}`, { pinned: pin ? 1 : 0 }); renderPage(); } catch (e) { console.error(e); } };
+window._capArchive = async (id) => { try { await POST(`/api/captures/${id}`, { archived: 1 }); renderPage(); } catch (e) { console.error(e); } };
+window._capMove = async (id) => { const nb = prompt('Move to notebook:'); if (nb) { try { await POST(`/api/captures/${id}`, { notebook: nb }); renderPage(); } catch (e) { console.error(e); } } };
+window._capMadeIt = async (id) => { try { await POST(`/api/captures/${id}/made-it`, {}); renderPage(); } catch (e) { console.error(e); } };
+window._capQuickCapture = async () => { const text = prompt('Quick capture:'); if (text) { try { await POST('/api/capture', { text, member_id: currentActor }); renderPage(); } catch (e) { console.error(e); } } };
+window._capConfirmOrg = async (id, notebook) => { try { await POST(`/api/captures/${id}`, { notebook }); await POST(`/api/captures/${id}/confirm`, {}); triageIndex++; renderPage(); } catch (e) { console.error(e); } };
+
 // ── PEOPLE ──
 async function renderPeople() {
   const m = document.getElementById('main');
@@ -1155,6 +1743,247 @@ async function renderSettings() {
             <td style="font-weight:500">${esc(action.replace(/_/g,' '))}</td>
             <td><span class="badge ${gate===true||gate==='autonomous'?'badge-grn':gate==='confirm'?'badge-warn':gate===false||gate==='off'?'badge-err':'badge-pink'}">${typeof gate==='boolean'?(gate?'on':'off'):esc(gate)}</span></td>
           </tr>`).join('')}</tbody></table></div>`;
+      } else if (settingsTab==='channels') {
+        let channelDetailId = null;
+        let channelDetailTab = 'setup';
+        
+        async function loadChannels() {
+          const d = await GET(`/api/channels/member/${currentActor}`);
+          const channels = d.channels || [];
+          const devicesData = await GET('/api/channels/devices');
+          const devices = devicesData.devices || [];
+          const accountsData = await GET(`/api/accounts?member_id=${currentActor}`);
+          const accounts = accountsData.accounts || [];
+          
+          if (channelDetailId) {
+            // Detail view
+            const channel = channels.find(c => c.id === channelDetailId);
+            if (!channel) {
+              channelDetailId = null;
+              return loadChannels();
+            }
+            
+            sc.innerHTML = `<div>
+              <button class="btn-s" style="margin-bottom:16px" onclick="window._backToChannelList()">← Back to Channels</button>
+              
+              <div class="card-flat" style="margin-bottom:16px">
+                <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px">
+                  <span style="font-size:32px">${esc(channel.icon || '💬')}</span>
+                  <div style="flex:1">
+                    <h2 style="font-size:20px;font-weight:600;font-family:var(--head);margin-bottom:4px">${esc(channel.display_name)}</h2>
+                    <div style="display:flex;gap:6px">
+                      <span class="badge ${ADAPTER_BADGE[channel.adapter_id] || 'badge-info'}">${esc(channel.adapter_id || '')}</span>
+                      <span class="badge ${channel.enabled ? 'badge-grn' : 'badge-warn'}">${channel.enabled ? 'Enabled' : 'Disabled'}</span>
+                      <span class="badge badge-${channel.health_status==='active'?'grn':'err'}">${esc(channel.health_status || 'unknown')}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              <div class="pill-tabs" style="margin-bottom:16px">
+                ${['setup','settings','access'].map(t => `<button class="pill ${t===channelDetailTab?'active':''}" onclick="window._channelTab('${t}')">${t}</button>`).join('')}
+              </div>
+              
+              <div id="channel-detail-content"></div>
+            </div>`;
+            
+            const cdc = document.getElementById('channel-detail-content');
+            
+            if (channelDetailTab === 'setup') {
+              const stepsData = await GET(`/api/channels/${channelDetailId}/onboarding`);
+              const steps = stepsData.steps || [];
+              cdc.innerHTML = `<div class="card-flat">
+                <h3 style="font-size:16px;font-weight:600;font-family:var(--head);margin-bottom:16px">Setup Wizard</h3>
+                <div style="display:flex;flex-direction:column;gap:12px">
+                  ${steps.map((s, i) => `
+                    <div style="display:flex;gap:16px;padding:16px;border-radius:10px;background:${s.status==='completed'?'var(--grn-bg)':s.status==='in_progress'?'var(--pink-bg2)':'var(--bg-input)'};border:1px solid ${s.status==='completed'?'var(--grn)':s.status==='in_progress'?'var(--pink)':'var(--bd)'}">
+                      <div style="width:32px;height:32px;border-radius:50%;background:${s.status==='completed'?'var(--grn)':s.status==='in_progress'?'var(--pink)':'var(--bd)'};color:#fff;display:flex;align-items:center;justify-content:center;font-weight:600;flex-shrink:0">
+                        ${s.status==='completed'?'✓':i+1}
+                      </div>
+                      <div style="flex:1">
+                        <div style="font-weight:600;margin-bottom:4px">${esc(s.title)}</div>
+                        <div style="font-size:13px;color:var(--tx2)">${esc(s.description || '')}</div>
+                        ${s.status==='pending' ? `<button class="btn-p btn-sm" style="margin-top:8px" onclick="window._completeStep('${esc(s.step_key)}')">Complete Step</button>` : ''}
+                      </div>
+                    </div>
+                  `).join('')}
+                </div>
+                ${channel.setup_complete ? '' : `<button class="btn-g" style="margin-top:16px" onclick="window._enableChannel('${channelDetailId}')">Enable Channel</button>`}
+              </div>`;
+            } else if (channelDetailTab === 'settings') {
+              cdc.innerHTML = `<div class="card-flat">
+                <h3 style="font-size:16px;font-weight:600;font-family:var(--head);margin-bottom:16px">Channel Settings</h3>
+                
+                <div style="margin-bottom:20px">
+                  <label style="font-size:13px;font-weight:600;color:var(--tx3);display:block;margin-bottom:6px">Capabilities</label>
+                  <div style="display:flex;gap:8px;flex-wrap:wrap">
+                    ${['In','Out','Draft','Extract','Voice'].map(cap => {
+                      const enabled = channel.config_json && JSON.parse(channel.config_json).capabilities?.includes(cap.toLowerCase());
+                      return `<span class="badge ${enabled?'badge-grn':'badge-warn'}">${enabled?'✓':''} ${cap}</span>`;
+                    }).join('')}
+                  </div>
+                </div>
+                
+                <div style="margin-bottom:20px">
+                  <label style="font-size:13px;font-weight:600;color:var(--tx3);display:block;margin-bottom:6px">Privacy Level</label>
+                  <select style="width:auto">
+                    <option ${channel.privacy_level==='full'?'selected':''}>full</option>
+                    <option ${channel.privacy_level==='metadata_only'?'selected':''}>metadata_only</option>
+                    <option ${channel.privacy_level==='none'?'selected':''}>none</option>
+                  </select>
+                </div>
+                
+                <div style="margin-bottom:20px">
+                  <label style="font-size:13px;font-weight:600;color:var(--tx3);display:block;margin-bottom:6px">Outbound Approval</label>
+                  <div style="display:flex;align-items:center;gap:8px">
+                    <input type="checkbox" ${channel.outbound_requires_approval?'checked':''} />
+                    <span style="font-size:14px">Require approval for outbound messages</span>
+                  </div>
+                </div>
+              </div>`;
+            } else if (channelDetailTab === 'access') {
+              const accessData = await GET(`/api/channels/${channelDetailId}/access`);
+              const memberAccess = accessData.memberAccess || [];
+              cdc.innerHTML = `<div class="card-flat">
+                <h3 style="font-size:16px;font-weight:600;font-family:var(--head);margin-bottom:16px">Member Access</h3>
+                <table><thead><tr>${['Member','Access Level','Can Approve Drafts','Batch Window'].map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>
+                  ${MEMBERS.map(m => {
+                    const access = memberAccess.find(a => a.member_id === m.id) || {};
+                    return `<tr>
+                      <td><div style="font-weight:500">${m.name}</div><div style="font-size:11px;color:var(--tx4)">${m.id}</div></td>
+                      <td><span class="badge badge-${access.access_level==='admin'?'pink':access.access_level==='write'?'lav':'teal'}">${esc(access.access_level || 'none')}</span></td>
+                      <td>${access.can_approve_drafts ? '✅' : '—'}</td>
+                      <td style="font-size:13px;color:var(--tx2)">${esc(access.batch_window || '—')}</td>
+                    </tr>`;
+                  }).join('')}
+                </tbody></table>
+              </div>`;
+            }
+            
+            window._channelTab = (tab) => { channelDetailTab = tab; loadChannels(); };
+            window._backToChannelList = () => { channelDetailId = null; loadChannels(); };
+            window._completeStep = async (stepKey) => {
+              try {
+                await POST(`/api/channels/${channelDetailId}/onboarding/${stepKey}/complete`, {});
+                loadChannels();
+              } catch(e) { alert('Failed: ' + e.message); }
+            };
+            window._enableChannel = async (id) => {
+              try {
+                await POST(`/api/channels/${id}/enable`, {});
+                loadChannels();
+              } catch(e) { alert('Failed: ' + e.message); }
+            };
+            
+          } else {
+            // List view
+            sc.innerHTML = `<div>
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+                <h3 style="font-size:18px;font-weight:600;font-family:var(--head)">Channels</h3>
+                <button class="btn-p">+ Add Channel</button>
+              </div>
+              
+              <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;margin-bottom:32px">
+                ${channels.map(ch => `
+                  <div class="card" onclick="window._viewChannel('${esc(ch.id)}')" style="cursor:pointer">
+                    <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+                      <span style="font-size:24px">${esc(ch.icon || '💬')}</span>
+                      <div style="flex:1">
+                        <div style="font-weight:600;margin-bottom:2px">${esc(ch.display_name)}</div>
+                        <span class="badge ${ADAPTER_BADGE[ch.adapter_id] || 'badge-info'}" style="font-size:10px">${esc(ch.adapter_id || '')}</span>
+                      </div>
+                      <div style="width:8px;height:8px;border-radius:50%;background:${ch.health_status==='active'?'var(--grn)':ch.health_status==='degraded'?'var(--warn)':'var(--err)'}"></div>
+                    </div>
+                    
+                    <div style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap">
+                      ${['In','Out','Draft','Extract','Voice'].map(cap => {
+                        const enabled = ch.config_json && JSON.parse(ch.config_json).capabilities?.includes(cap.toLowerCase());
+                        return `<span style="width:20px;height:20px;border-radius:50%;background:${enabled?'var(--grn-bg)':'var(--bg-input)'};color:${enabled?'var(--grn)':'var(--tx4)'};font-size:10px;display:flex;align-items:center;justify-content:center;font-weight:600" title="${cap}">${cap.charAt(0)}</span>`;
+                      }).join('')}
+                    </div>
+                    
+                    <div style="font-size:12px;color:var(--tx3)">
+                      Owner: ${esc(ch.owner_name || '—')}<br>
+                      Access: <span class="badge badge-${ch.access_level==='admin'?'pink':'lav'}" style="font-size:10px">${esc(ch.access_level || 'read')}</span>
+                    </div>
+                    
+                    ${ch.setup_complete ? '' : `<div style="margin-top:8px;font-size:11px;color:var(--warn);font-weight:600">⚠️ Setup incomplete</div>`}
+                  </div>
+                `).join('')}
+              </div>
+              
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+                <div class="card-flat">
+                  <h3 style="font-size:16px;font-weight:600;font-family:var(--head);margin-bottom:12px">Devices</h3>
+                  ${devices.slice(0,5).map(dev => `
+                    <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-top:1px solid var(--bd)">
+                      <div><div style="font-weight:500;font-size:14px">${esc(dev.display_name)}</div><div style="font-size:11px;color:var(--tx3)">${esc(dev.device_type || '')}</div></div>
+                      <span class="badge ${dev.status==='active'?'badge-grn':'badge-warn'}" style="font-size:10px">${esc(dev.status || 'unknown')}</span>
+                    </div>
+                  `).join('')}
+                </div>
+                
+                <div class="card-flat">
+                  <h3 style="font-size:16px;font-weight:600;font-family:var(--head);margin-bottom:12px">Accounts</h3>
+                  ${accounts.slice(0,5).map(acc => `
+                    <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-top:1px solid var(--bd)">
+                      <div><div style="font-weight:500;font-size:14px">${esc(acc.address)}</div><div style="font-size:11px;color:var(--tx3)">${esc(acc.account_type || '')}</div></div>
+                      <span class="badge ${acc.auth_status==='active'?'badge-grn':'badge-warn'}" style="font-size:10px">${esc(acc.auth_status || 'inactive')}</span>
+                    </div>
+                  `).join('')}
+                </div>
+              </div>
+            </div>`;
+            
+            window._viewChannel = (id) => { channelDetailId = id; loadChannels(); };
+          }
+        }
+        
+        loadChannels();
+      } else if (settingsTab==='captures') {
+        const d = await GET('/api/settings/captures');
+        const config = d.config || {};
+        const adapters = d.adapters || [];
+        sc.innerHTML = `<div>
+          <div class="card-flat" style="margin-bottom:16px">
+            <h3 style="font-size:16px;font-weight:600;font-family:var(--head);margin-bottom:16px">Capture Sources</h3>
+            <table><thead><tr>${['Source','Status','Last Capture'].map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>
+            ${adapters.map(a => `<tr>
+              <td><div style="font-weight:500">${esc(a.name)}</div><div style="font-size:11px;color:var(--tx4)">${esc(a.id)}</div></td>
+              <td><span class="badge ${a.enabled ? 'badge-grn' : 'badge-warn'}">${a.enabled ? 'Enabled' : 'Disabled'}</span></td>
+              <td style="font-size:13px;color:var(--tx3)">${esc(a.last_capture || '—')}</td>
+            </tr>`).join('')}
+            </tbody></table>
+          </div>
+          
+          <div class="card-flat" style="margin-bottom:16px">
+            <h3 style="font-size:14px;font-weight:600;margin-bottom:12px">Organization</h3>
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid var(--bd)">
+              <span>Deep Organizer</span>
+              <span class="badge ${config.deep_organizer_enabled ? 'badge-grn' : 'badge-warn'}">${config.deep_organizer_enabled ? 'Enabled' : 'Disabled'}</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid var(--bd)">
+              <span>Organizer Interval</span>
+              <span style="font-size:13px;color:var(--tx2)">${config.deep_organizer_interval_minutes || 30} minutes</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;">
+              <span>Batch Size</span>
+              <span style="font-size:13px;color:var(--tx2)">${config.deep_organizer_batch_size || 20} captures</span>
+            </div>
+          </div>
+          
+          <div class="card-flat">
+            <h3 style="font-size:14px;font-weight:600;margin-bottom:12px">Recipes</h3>
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid var(--bd)">
+              <span>Recipe Extraction</span>
+              <span class="badge ${config.recipe_extraction ? 'badge-grn' : 'badge-warn'}">${config.recipe_extraction ? 'Enabled' : 'Disabled'}</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;">
+              <span>Resurfacing</span>
+              <span class="badge ${config.resurfacing_enabled ? 'badge-grn' : 'badge-warn'}">${config.resurfacing_enabled ? 'Enabled' : 'Disabled'}</span>
+            </div>
+          </div>
+        </div>`;
       } else if (settingsTab==='memory') {
         let q = '';
         async function loadMemory(query) {
@@ -1183,6 +2012,13 @@ async function renderSettings() {
   }
   window._settingsTab = load;
   load(settingsTab);
+}
+
+// ── Boot ──
+if (window.location.hash === '#scoreboard' || window.location.hash === '#/scoreboard') {
+  renderTVScoreboard();
+} else {
+  initApp();
 }
 </script>
 </body>

@@ -394,5 +394,45 @@ export function createChannelRouter(getDB, auditLog, guardedWrite) {
     }
   }));
 
+  // GET /api/channels/:id/onboarding — get onboarding steps
+  router.get("/:id/onboarding", (req, res) => {
+    const db = getDB();
+    const channelId = req.params.id;
+
+    try {
+      const steps = db.prepare(`
+        SELECT * FROM comms_onboarding_steps 
+        WHERE channel_id = ? 
+        ORDER BY step_number
+      `).all(channelId);
+
+      res.json({ steps });
+    } catch (e) {
+      res.status(500).json({ error: e.message, steps: [] });
+    }
+  });
+
+  // GET /api/channels/:id/access — get member access for channel
+  router.get("/:id/access", (req, res) => {
+    const db = getDB();
+    const channelId = req.params.id;
+
+    try {
+      const memberAccess = db.prepare(`
+        SELECT 
+          cma.*,
+          cm.display_name as member_name
+        FROM comms_channel_member_access cma
+        LEFT JOIN common_members cm ON cm.id = cma.member_id
+        WHERE cma.channel_id = ?
+        ORDER BY cm.display_name
+      `).all(channelId);
+
+      res.json({ memberAccess });
+    } catch (e) {
+      res.status(500).json({ error: e.message, memberAccess: [] });
+    }
+  });
+
   return router;
 }

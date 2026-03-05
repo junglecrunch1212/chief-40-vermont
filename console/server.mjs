@@ -2056,8 +2056,9 @@ app.get("/api/sensors", requireMember, (req, res) => {
 // START
 // ═══════════════════════════════════════════════════════════
 
-app.listen(PORT, '127.0.0.1', () => {
-  console.log(`PIB Console on http://127.0.0.1:${PORT} (Tailscale Serve will proxy)`);
+const BIND_HOST = process.env.PIB_ENV === 'dev' ? '0.0.0.0' : '127.0.0.1';
+app.listen(PORT, BIND_HOST, () => {
+  console.log(`PIB Console on http://${BIND_HOST}:${PORT}${BIND_HOST === '127.0.0.1' ? ' (Tailscale Serve will proxy)' : ' (dev mode — open)'}`);
   console.log(`Database: ${DB_PATH}`);
 });
 

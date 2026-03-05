@@ -37,11 +37,12 @@ def laura_secret():
 
 
 @pytest.fixture
-def legacy_secret():
-    """Set legacy BLUEBUBBLES_SECRET for backward compat tests."""
-    os.environ["BLUEBUBBLES_SECRET"] = "legacy-secret-123"
-    yield "legacy-secret-123"
-    del os.environ["BLUEBUBBLES_SECRET"]
+def no_secrets():
+    """Ensure no BlueBubbles secrets are set."""
+    for key in ["BLUEBUBBLES_JAMES_SECRET", "BLUEBUBBLES_LAURA_SECRET"]:
+        os.environ.pop(key, None)
+    yield
+    # cleanup handled by other fixtures
 
 
 # ═══════════════════════════════════════════════════════════
@@ -114,11 +115,11 @@ class TestBridgeWebhookIsolation:
         assert result.get("status") == "unauthorized"
 
     @pytest.mark.asyncio
-    async def test_unknown_bridge_uses_legacy_fallback(self, db, legacy_secret):
-        """Unknown bridge_id falls back to legacy BLUEBUBBLES_SECRET."""
+    async def test_unknown_bridge_rejected(self, db, james_secret):
+        """Unknown bridge_id with no matching secret returns unauthorized."""
         result = await cmd_webhook_receive(db, {
             "bridge_id": "unknown",
-            "api_key": legacy_secret,
+            "api_key": "some-random-secret",
             "payload": {
                 "message": {
                     "guid": "test-guid-003",
@@ -128,16 +129,14 @@ class TestBridgeWebhookIsolation:
             },
         }, "dev")
 
-        # Should process (no bridge enforcement on unknown bridges)
-        assert result.get("status") == "processed"
-        # member_id resolved via normal pipeline (not forced)
-        assert result.get("bridge_id") is None
+        assert "error" in result
+        assert result.get("status") == "unauthorized"
 
     @pytest.mark.asyncio
     async def test_no_bridge_secret_configured_error(self, db):
         """Missing BLUEBUBBLES_{BRIDGE}_SECRET returns config error."""
         # Ensure no secrets are set
-        for key in ["BLUEBUBBLES_JAMES_SECRET", "BLUEBUBBLES_LAURA_SECRET", "BLUEBUBBLES_SECRET"]:
+        for key in ["BLUEBUBBLES_JAMES_SECRET", "BLUEBUBBLES_LAURA_SECRET"]:
             os.environ.pop(key, None)
 
         result = await cmd_webhook_receive(db, {

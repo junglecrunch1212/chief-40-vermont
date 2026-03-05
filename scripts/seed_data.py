@@ -18,6 +18,9 @@ MEMBERS = [
         "can_be_assigned_tasks": 1, "can_receive_messages": 1,
         "preferred_channel": "imessage", "view_mode": "carousel",
         "digest_mode": "full", "velocity_cap": 15,
+        # Contact fields — fill these with real values after bootstrap
+        "phone": "+1XXXXXXXXXX", "email": "james@example.com",
+        "imessage_handle": "james@example.com",
         "energy_markers": json.dumps({"peak_hours": ["09:00-12:00"], "crash_hours": ["14:00-16:00"]}),
         "medication_config": json.dumps({
             "name": "Adderall", "typical_dose_time": "07:30",
@@ -29,6 +32,8 @@ MEMBERS = [
         "can_be_assigned_tasks": 1, "can_receive_messages": 1,
         "preferred_channel": "imessage", "view_mode": "compressed",
         "digest_mode": "compressed", "velocity_cap": 20,
+        "phone": "+1XXXXXXXXXX", "email": "laura@example.com",
+        "imessage_handle": "laura@example.com",
     },
     {
         "id": "m-charlie", "display_name": "Charlie", "role": "child",
@@ -65,6 +70,69 @@ CAPTAIN_ITEM = {
         "vet": "Peachtree Vet", "meds_monthly": True,
     }),
 }
+
+# Calendar sources — fill google_calendar_id with real IDs from Google Calendar settings
+CALENDAR_SOURCES = [
+    {
+        "id": "cal-james-personal",
+        "google_calendar_id": "james@example.com",
+        "summary": "James Personal",
+        "purpose": "James personal calendar",
+        "for_member_ids": json.dumps(["m-james"]),
+        "classification_id": "src-james-personal",
+    },
+    {
+        "id": "cal-laura-personal",
+        "google_calendar_id": "laura@example.com",
+        "summary": "Laura Personal",
+        "purpose": "Laura personal calendar",
+        "for_member_ids": json.dumps(["m-laura"]),
+        "classification_id": "src-laura-personal",
+    },
+    {
+        "id": "cal-laura-work",
+        "google_calendar_id": "laura@work-domain.com",
+        "summary": "Laura Work",
+        "purpose": "Laura work calendar (titles redacted)",
+        "for_member_ids": json.dumps(["m-laura"]),
+        "classification_id": "src-laura-work",
+    },
+    {
+        "id": "cal-family",
+        "google_calendar_id": "family-calendar-id@group.calendar.google.com",
+        "summary": "Family",
+        "purpose": "Shared family calendar",
+        "for_member_ids": json.dumps(["m-james", "m-laura", "m-charlie"]),
+        "classification_id": "src-family",
+    },
+]
+
+SOURCE_CLASSIFICATIONS = [
+    {
+        "id": "src-james-personal", "source_type": "calendar",
+        "source_identifier": "james@example.com", "display_name": "James Personal",
+        "relevance": "blocks_member", "ownership": "member",
+        "privacy": "full", "authority": "system_managed",
+    },
+    {
+        "id": "src-laura-personal", "source_type": "calendar",
+        "source_identifier": "laura@example.com", "display_name": "Laura Personal",
+        "relevance": "blocks_member", "ownership": "member",
+        "privacy": "privileged", "authority": "system_managed",
+    },
+    {
+        "id": "src-laura-work", "source_type": "calendar",
+        "source_identifier": "laura@work-domain.com", "display_name": "Laura Work",
+        "relevance": "blocks_member", "ownership": "member",
+        "privacy": "redacted", "authority": "system_managed",
+    },
+    {
+        "id": "src-family", "source_type": "calendar",
+        "source_identifier": "family@group.calendar.google.com", "display_name": "Family",
+        "relevance": "blocks_household", "ownership": "shared",
+        "privacy": "full", "authority": "system_managed",
+    },
+]
 
 LIFE_PHASES = [
     {
@@ -143,6 +211,7 @@ PIB_CONFIG = [
     ("charlie_star_milestone_50", "Choose weekend activity", "Reward at 50 stars"),
     ("charlie_star_milestone_100", "Special outing with parent", "Reward at 100 stars"),
     ("household_timezone", "America/New_York", "Atlanta timezone for all date math"),
+    ("google_sheets_spreadsheet_id", "", "Google Sheets spreadsheet ID for sync (fill after creating sheet)"),
     ("emergency_contacts", json.dumps({
         "vet": "Peachtree Vet (404) 555-0111",
         "pediatrician": "Dr. Chen (404) 555-0222",
@@ -212,8 +281,28 @@ async def seed(db_path: str = "pib.db"):
             [key, value, desc],
         )
 
+    # Source classifications (for calendar privacy rules)
+    for sc in SOURCE_CLASSIFICATIONS:
+        await conn.execute(
+            "INSERT OR IGNORE INTO common_source_classifications "
+            "(id, source_type, source_identifier, display_name, relevance, ownership, privacy, authority) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            [sc["id"], sc["source_type"], sc["source_identifier"], sc["display_name"],
+             sc["relevance"], sc["ownership"], sc["privacy"], sc["authority"]],
+        )
+
+    # Calendar sources
+    for cs in CALENDAR_SOURCES:
+        await conn.execute(
+            "INSERT OR IGNORE INTO cal_sources "
+            "(id, google_calendar_id, summary, purpose, for_member_ids, classification_id) "
+            "VALUES (?,?,?,?,?,?)",
+            [cs["id"], cs["google_calendar_id"], cs["summary"], cs["purpose"],
+             cs["for_member_ids"], cs["classification_id"]],
+        )
+
     # ID sequences
-    for prefix in ["tsk", "mem", "lst", "itm", "com", "ses"]:
+    for prefix in ["tsk", "mem", "lst", "itm", "com", "ses", "cal"]:
         await conn.execute(
             "INSERT OR IGNORE INTO common_id_sequences (prefix, next_val) VALUES (?, 1)",
             [prefix],
@@ -222,6 +311,7 @@ async def seed(db_path: str = "pib.db"):
     await conn.commit()
     print(f"Seeded {db_path} successfully.")
     print(f"  Members: {len(MEMBERS)}")
+    print(f"  Calendar sources: {len(CALENDAR_SOURCES)}")
     print(f"  Life phases: {len(LIFE_PHASES)}")
     print(f"  Coach protocols: {len(COACH_PROTOCOLS)}")
     print(f"  Config entries: {len(PIB_CONFIG)}")

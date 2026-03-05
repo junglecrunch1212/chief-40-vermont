@@ -55,3 +55,4 @@ htmlcov/
 # Temporary
 /tmp/
 *.tmp
+data/

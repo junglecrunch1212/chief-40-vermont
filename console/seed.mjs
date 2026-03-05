@@ -86,12 +86,13 @@ function runMigrations(db) {
     
     console.log(`  Applying ${file}...`);
     
-    // Execute entire file as one block (SQLite handles multiple statements)
+    // Strip DOWN section (rollback SQL) and execute only the UP portion
+    const upOnly = sql.split('-- DOWN')[0];
     try {
-      db.exec(sql);
+      db.exec(upOnly);
     } catch (err) {
-      // Log errors but continue (some migrations may reference non-existent tables)
       if (!err.message.includes('already exists') && 
+          !err.message.includes('duplicate column') &&
           !err.message.includes('no such table')) {
         console.error(`    ERROR: ${err.message}`);
       }
@@ -629,7 +630,7 @@ function seedData(db) {
       config_json: JSON.stringify({ capabilities: ['in', 'extract', 'voice'], device_id: 'dev-james-iphone' }) },
     { id: 'ch-outlook-laura', display_name: 'Outlook (Laura Work)', icon: '📨', category: 'conversational',
       adapter_id: 'email', enabled: 1, setup_complete: 1,
-      privacy_level: 'privileged', content_storage: 'metadata_only', outbound_requires_approval: 1,
+      privacy_level: 'metadata_only', content_storage: 'metadata_only', outbound_requires_approval: 1,
       config_json: JSON.stringify({ capabilities: ['in'], account_id: 'acc-outlook-laura' }) },
   ];
   
@@ -663,7 +664,7 @@ function seedData(db) {
     { member_id: 'm-james', channel_id: 'ch-imessage-james', access_level: 'admin', can_approve_drafts: 1, batch_window: 'evening' },
     { member_id: 'm-james', channel_id: 'ch-sms-james', access_level: 'admin', can_approve_drafts: 1, batch_window: 'evening' },
     { member_id: 'm-james', channel_id: 'ch-voice-james', access_level: 'admin', can_approve_drafts: 1, batch_window: null },
-    { member_id: 'm-james', channel_id: 'ch-outlook-laura', access_level: 'metadata', can_approve_drafts: 0, batch_window: null },
+    { member_id: 'm-james', channel_id: 'ch-outlook-laura', access_level: 'read', can_approve_drafts: 0, batch_window: null },
     
     // Laura admin on her channels
     { member_id: 'm-laura', channel_id: 'ch-outlook-laura', access_level: 'admin', can_approve_drafts: 1, batch_window: 'midday' },

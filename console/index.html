@@ -235,7 +235,10 @@ async function api(path, opts = {}) {
 let authenticatedMember = null;
 async function bootstrapIdentity() {
   try {
-    const d = await api('/api/whoami');
+    // Use fetch directly to avoid api()'s 401 page takeover
+    const res = await fetch('/api/whoami?view_as=' + currentActor);
+    if (!res.ok) { console.warn('Identity: not authenticated (dev mode — using actor picker)'); return; }
+    const d = await res.json();
     authenticatedMember = d;
     if (d.memberId && !localStorage.getItem('pib-actor-override')) {
       currentActor = d.memberId;

@@ -13,20 +13,38 @@ updated: "2026-03-03"
 # ═══════════════════════════════════════════════════════════
 
 action_gates:
+  # Task operations
   task_create: true
   task_complete: true
   task_update: confirm
   task_snooze: confirm
+  # Calendar operations
   calendar_hold_create: confirm
   calendar_hold_confirm: confirm
   calendar_hold_reject: confirm
+  # Recurring tasks
   recurring_mark_done: true
   recurring_mark_skip: true
+  # State tracking
   state_update: true           # Meds, sleep, energy — always auto-approve
+  # Capture & webhooks
   capture_create: true
   webhook_receive: true        # Inbound messages always processed
+  # Proactive engine
   run_proactive_checks: true   # Cron-triggered, always auto-approve
-  member_settings_set: confirm # Per-member settings require confirmation
+  # Lists
+  list_item_toggle: true       # Grocery/shopping list items — auto-approve
+  # Approvals (decisions)
+  approval_decide: confirm     # Laura's decisions require explicit confirm
+  # Config management
+  config_set: confirm          # System config changes require confirmation
+  # Coaching protocols
+  coaching_toggle: confirm     # Enabling/disabling coaching protocols
+  # Household management
+  member_add: confirm          # Adding new household members
+  member_deactivate: confirm   # Deactivating members
+  # Chores (child-facing)
+  chore_toggle: true           # Charlie checking off chores — auto-approve
   # Channel management
   channel_enable: confirm      # Enabling channels requires approval
   channel_disable: confirm
@@ -35,6 +53,12 @@ action_gates:
   channel_grant_access: confirm
   channel_revoke_access: confirm
   channel_setup_member: confirm
+  # Comms/inbox operations
+  comms_approve_draft: confirm # Approving drafted messages
+  comms_respond: true          # Marking comm as responded
+  comms_snooze: true           # Snoozing comm items
+  # Sensor ingest
+  sensor_ingest: true          # Device sensor data — auto-approve
 
 # Agent-specific overrides (merged on top of defaults above)
 agent_overrides:
@@ -51,11 +75,18 @@ agent_overrides:
     task_update: off
 
 # ═══════════════════════════════════════════════════════════
-# RATE LIMITS
+# RATE LIMITS (per source)
 # ═══════════════════════════════════════════════════════════
 
 rate_limits:
-  writes_per_minute: 3
+  # Per-source webhook limits (requests per minute)
+  twilio: 30                   # SMS inbound
+  siri: 20                     # Siri Shortcuts
+  bluebubbles: 60              # iMessage bridge
+  sheets: 30                   # Google Sheets webhook
+  web_chat: 10                 # Console chat interface
+  # Generic write limits
+  writes_per_minute: 3         # Max writes from console per user per minute
   alert_threshold: 3           # Alert Bossman after this many writes in 60s
 
 # ═══════════════════════════════════════════════════════════

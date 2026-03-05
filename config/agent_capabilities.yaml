@@ -38,35 +38,49 @@ agents:
       - "health"                # System health check
       - "streak"                # Recurring task streaks
       - "upcoming"              # Upcoming recurring tasks
+      - "scoreboard-data"       # Charlie's chores + streaks
       # Writes (governance-gated)
       - "task-create"           # → governance: task_create (true)
       - "task-complete"         # → governance: task_complete (true)
       - "task-update"           # → governance: task_update (confirm)
-      - "task-snooze"           # → governance: task_update (confirm)
+      - "task-snooze"           # → governance: task_snooze (confirm)
       - "hold-create"           # → governance: calendar_hold_create (confirm)
       - "hold-confirm"          # → governance: calendar_hold_confirm (confirm)
-      - "hold-reject"           # → governance: calendar_hold_create (confirm)
+      - "hold-reject"           # → governance: calendar_hold_reject (confirm)
       - "recurring-done"        # → governance: recurring_mark_done (true)
-      - "recurring-skip"        # → governance: recurring_mark_done (true)
-      - "state-update"          # Record meds taken, sleep quality, energy
-      - "capture"               # Quick capture to inbox
+      - "recurring-skip"        # → governance: recurring_mark_skip (true)
+      - "state-update"          # → governance: state_update (true) — meds, sleep, energy
+      - "capture"               # → governance: capture_create (true)
       - "context"               # Assemble LLM context (agent-filtered)
       - "member-settings-get"   # Read per-member settings
       - "member-settings-set"   # → governance: member_settings_set (confirm)
-      # Channel management (read-only for CoS)
+      # Channel management (CoS can read, writes require confirm)
       - "channel-list"          # List all channels
       - "channel-status"        # Get channel health/config
       - "channel-onboarding"    # Get onboarding steps
       - "channel-send-enum"     # Get sendable channels for LLM tools
       - "channel-member-list"   # List member's visible channels
+      - "channel-enable"        # → governance: channel_enable (confirm)
+      - "channel-disable"       # → governance: channel_disable (confirm)
       - "device-list"           # List devices
       - "account-list"          # List accounts
+      # Comms/inbox
+      - "comms-approve-draft"   # → governance: comms_approve_draft (confirm)
+      - "comms-respond"         # → governance: comms_respond (true)
+      - "comms-snooze"          # → governance: comms_snooze (true)
+      # Webhook ingest
+      - "webhook-receive"       # → governance: webhook_receive (true)
+      - "sensor-ingest"         # → governance: sensor_ingest (true)
     blocked_cli_commands:
       - "migrate"               # Schema changes
       - "bootstrap"             # System init
       - "backup"                # Ops-only
       - "fts5-rebuild"          # Maintenance
       - "seed"                  # Data seeding
+      - "channel-add"           # Only dev can add new channels
+      - "channel-update"        # Only dev can modify channel config
+      - "channel-grant-access"  # Only dev can grant access
+      - "channel-revoke-access" # Only dev can revoke access
     filesystem: read-only       # Can read SOUL.md, AGENTS.md etc. Never write.
     sql: none                   # No direct SQL. Everything through CLI.
     privacy:

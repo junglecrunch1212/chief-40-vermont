@@ -3,25 +3,109 @@
 # Each personal Mac Mini runs Apple services (BlueBubbles, Shortcuts, HomeKit)
 # bound to a single Apple ID. This file documents the topology and controls
 # privacy classification at the sensor ingest layer.
+#
+# Credential Pattern (per spec):
+#   BLUEBUBBLES_{MEMBER}_SECRET — shared secret for webhook auth
+#   BLUEBUBBLES_{MEMBER}_URL — base URL for the bridge
+#
+# Privacy Enforcement:
+#   - normal: Full content enters LLM context
+#   - privileged: Existence + timing only ("Laura has a meeting 2-4pm")
+#                 Content NEVER enters LLM context (filtered at read layer)
+#   - redacted: Existence only ("Laura is unavailable")
+#
+version: "1.0"
+updated: "2026-03-05"
 
 bridges:
   james:
+    display_name: "James's Mac Mini"
     hostname: james-mini.local
     member_id: m-james
-    services: [bluebubbles, shortcuts, homebridge, homekit]
+    services:
+      - bluebubbles
+      - shortcuts
+      - homebridge
+      - homekit
     apple_id_owner: james
-    privacy_class: normal  # James's data is normal privacy
+    privacy_class: normal
+    credentials:
+      bluebubbles_secret_env: BLUEBUBBLES_JAMES_SECRET
+      bluebubbles_url_env: BLUEBUBBLES_JAMES_URL
+    notes: |
+      James's personal bridge. All data classified as normal privacy.
+      Full content enters context for whatNow() and coaching.
 
   laura:
+    display_name: "Laura's Mac Mini"
     hostname: laura-mini.local
     member_id: m-laura
-    services: [bluebubbles, shortcuts]
+    services:
+      - bluebubbles
+      - shortcuts
     apple_id_owner: laura
-    privacy_class: privileged  # Laura's data is privileged by default
+    privacy_class: privileged
+    credentials:
+      bluebubbles_secret_env: BLUEBUBBLES_LAURA_SECRET
+      bluebubbles_url_env: BLUEBUBBLES_LAURA_URL
+    notes: |
+      Laura's personal bridge. Default privacy: privileged.
+      Work calendar titles never enter LLM context.
+      Personal iMessages routed through her bridge are full-content
+      unless classified otherwise.
 
-# Central CoS Mac Mini — runs the brain, no Apple ID binding
+# ═══════════════════════════════════════════════════════════
+# CENTRAL CoS MAC MINI
+# ═══════════════════════════════════════════════════════════
+
 cos:
+  display_name: "PIB Mac Mini (Central)"
   hostname: pib-mini.local
-  services: [openclaw, pib-core, console, sensor-bus]
-  apple_id_owner: none
+  services:
+    - openclaw           # Agent runtime
+    - pib-core           # Python CLI + domain logic
+    - console            # Web dashboard (port 3333)
+    - sensor-bus         # Future: unified sensor ingestion
+  apple_id_owner: none   # No Apple ID — server only
   google_account: jrstice@gmail.com
+  notes: |
+    Central brain. No personal data originates here.
+    All sensors/bridges route TO this host.
+    SQLite SSOT lives at /opt/pib/data/pib.db on this host.
+
+# ═══════════════════════════════════════════════════════════
+# ROLE-BASED VISIBILITY (enforced by CLI + console)
+# ═══════════════════════════════════════════════════════════
+
+role_visibility:
+  parent:
+    sees: [all_tasks, all_calendar, all_financial, household_status, crm]
+    privacy_fence: [other_parent_privileged_calendar]
+  child:
+    sees: [assigned_chores, own_schedule, scoreboard]
+    privacy_fence: [adult_tasks, financial, calendar_details, crm]
+  nanny:
+    sees: [assigned_tasks, child_schedule, child_location, captain_care, emergency_contacts]
+    privacy_fence: [finances, adult_schedules, legal, household_crm]
+    auto_expires: true
+  babysitter:
+    sees: [assigned_tasks, child_schedule, child_location, captain_care, emergency_contacts]
+    privacy_fence: [finances, adult_schedules, legal, household_crm]
+    auto_expires: true
+  coparent:
+    sees: [shared_custody_schedule, child_logistics, handoff_tasks]
+    privacy_fence: [household_finances, adult_personal_tasks, work_data]
+  dog_walker:
+    sees: [captain_tasks_only]
+    privacy_fence: [everything_else]
+    auto_expires: true
+  other:
+    sees: [assigned_tasks_only]
+    privacy_fence: [all_household_data]
+    auto_expires: true
+
+# Notes on enforcement:
+# 1. Privacy filtering happens at the read layer (ops_tasks, cal_classified_events queries)
+# 2. SQL WHERE clauses enforce role boundaries (member_id, for_member_ids arrays)
+# 3. Auto-expiration: temp members have effective_until date; cron deactivates expired
+# 4. Console renders different nav/tabs based on role (child view = no sidebar chrome)

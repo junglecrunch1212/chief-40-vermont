@@ -15,11 +15,77 @@ import { readFileSync, existsSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import yaml from "js-yaml";
+import { whatNow, loadSnapshot } from "../scripts/core/what_now.mjs";
+import {
+  selectReward,
+  getCompletionStats,
+  generateOneMoreNudge,
+  updateStreak,
+  getEndowedProgress,
+  shouldShowMomentumNudge,
+  generateMomentumMessage
+} from "../scripts/core/behavioral_engine.mjs";
+import { createCommsRouter } from "./comms_routes.mjs";
+import { createChannelRouter } from "./channel_routes.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, "..");
 const PORT = parseInt(process.env.PIB_CONSOLE_PORT || "3333", 10);
 const DB_PATH = process.env.PIB_DB_PATH || "/opt/pib/data/pib.db";
+
+// ═══════════════════════════════════════════════════════════
+// RATE LIMITER (per spec §3.3)
+// ═══════════════════════════════════════════════════════════
+
+class RateLimiter {
+  constructor() {
+    this._windows = new Map(); // source -> [timestamps]
+  }
+
+  check(source, maxRequests = 60, windowSeconds = 60) {
+    const now = Date.now() / 1000; // seconds
+    const windowKey = source;
+    
+    if (!this._windows.has(windowKey)) {
+      this._windows.set(windowKey, []);
+    }
+    
+    const timestamps = this._windows.get(windowKey);
+    // Remove expired timestamps
+    const cutoff = now - windowSeconds;
+    const validTimestamps = timestamps.filter(t => t > cutoff);
+    
+    if (validTimestamps.length >= maxRequests) {
+      return false; // Rate limit exceeded
+    }
+    
+    validTimestamps.push(now);
+    this._windows.set(windowKey, validTimestamps);
+    return true;
+  }
+}
+
+const rateLimiter = new RateLimiter();
+
+// Rate limit middleware factory
+function rateLimitMiddleware(sourceKey) {
+  return (req, res, next) => {
+    const gov = loadGovernance();
+    const limits = gov.rate_limits || {};
+    const maxRequests = limits[sourceKey] || 60;
+    const source = `${sourceKey}-${req.ip || 'unknown'}`;
+    
+    if (!rateLimiter.check(source, maxRequests, 60)) {
+      return res.status(429).json({
+        error: "rate_limit_exceeded",
+        source: sourceKey,
+        limit: `${maxRequests}/min`,
+        retry_after: 60,
+      });
+    }
+    next();
+  };
+}
 
 // ═══════════════════════════════════════════════════════════
 // DATABASE
@@ -29,9 +95,13 @@ let db;
 function getDB() {
   if (!db) {
     db = new Database(DB_PATH, { readonly: true });
+    // SQLite config per spec §3.5
     db.pragma("journal_mode = WAL");
     db.pragma("busy_timeout = 5000");
     db.pragma("foreign_keys = ON");
+    db.pragma("synchronous = NORMAL");
+    db.pragma("cache_size = -64000");      // 64MB page cache
+    db.pragma("mmap_size = 268435456");    // 256MB memory-mapped I/O
   }
   return db;
 }
@@ -74,15 +144,26 @@ function runCLI(command, args = {}, memberId = null) {
 
 function getWriteDB() {
   const wdb = new Database(DB_PATH);
+  // SQLite config per spec §3.5
   wdb.pragma("journal_mode = WAL");
   wdb.pragma("busy_timeout = 5000");
+  wdb.pragma("foreign_keys = ON");
+  wdb.pragma("synchronous = NORMAL");
+  wdb.pragma("cache_size = -64000");
+  wdb.pragma("mmap_size = 268435456");
   return wdb;
 }
 
 function auditLog(db, action, detail, memberId) {
+  // Schema: (ts, table_name, operation, entity_id, old_values, new_values, actor, source, metadata)
+  // action format: "table-operation" or fallback to "unknown"
+  const parts = action.split('-');
+  const table_name = parts.length > 1 ? parts[0] : 'unknown';
+  const operation = parts.length > 1 ? parts[1].toUpperCase() : 'UPDATE';
   db.prepare(
-    "INSERT INTO common_audit_log (id, action, detail, actor, created_at) VALUES (?, ?, ?, ?, datetime('now'))"
-  ).run(crypto.randomUUID(), action, detail, memberId || 'console');
+    "INSERT INTO common_audit_log (table_name, operation, actor, source, metadata) " +
+    "VALUES (?, ?, ?, ?, ?)"
+  ).run(table_name, operation, memberId || 'console', 'console', detail);
 }
 
 function todayET() {
@@ -142,7 +223,7 @@ function checkConsolePermission(action, memberId) {
 /**
  * Wrap a direct-DB-write endpoint with permission checks + audit logging.
  * action: governance gate key (e.g., "list_item_toggle")
- * writeFn: (wdb, req, res) => { ... perform write, return result ... }
+ * writeFn: (req, res) => { ... perform write, return result ... }
  */
 function guardedWrite(action, writeFn) {
   return (req, res) => {
@@ -155,7 +236,17 @@ function guardedWrite(action, writeFn) {
         action,
       });
     }
-    return writeFn(req, res);
+    // Provide write DB to the handler
+    const wdb = getWriteDB();
+    req.writeDB = wdb;
+    try {
+      const result = writeFn(req, res);
+      wdb.close();
+      return result;
+    } catch (e) {
+      wdb.close();
+      throw e;
+    }
   };
 }
 
@@ -176,6 +267,12 @@ function loadYAML(filename) {
 const app = express();
 app.use(express.json());
 app.use(express.static(__dirname)); // serve index.html + assets
+
+// Mount Comms & Channel routers
+const commsRouter = createCommsRouter(getDB, auditLog, guardedWrite);
+const channelRouter = createChannelRouter(getDB, auditLog, guardedWrite);
+app.use("/api/comms", requireMember, commsRouter);
+app.use("/api/channels", requireMember, channelRouter);
 
 // ─── Member Identity Middleware ───
 
@@ -226,8 +323,9 @@ app.get("/api/today-stream", requireMember, (req, res) => {
   const d = getDB();
   const memberId = req.memberId;
 
-  // whatNow via CLI
-  const wnResult = runCLI("what-now", {}, memberId);
+  // whatNow via direct call (Layer 1 - no LLM, always works)
+  const snapshot = loadSnapshot(d, memberId);
+  const wnResult = whatNow(memberId, snapshot);
 
   // Energy state
   const today = todayET();
@@ -262,11 +360,41 @@ app.get("/api/today-stream", requireMember, (req, res) => {
     "ORDER BY CASE status WHEN 'in_progress' THEN 0 WHEN 'next' THEN 1 WHEN 'inbox' THEN 2 ELSE 3 END, due_date"
   ).all(memberId);
 
-  // Build unified stream
+  // Build unified stream with endowed progress
   const stream = [];
+  
+  // Add endowed progress items (woke up, opened PIB)
+  const endowed = getEndowedProgress(memberId, today);
+  stream.push(...endowed);
+
+  // Completed tasks today
+  const doneTasks = d.prepare(`
+    SELECT * FROM ops_tasks 
+    WHERE assignee = ? AND status = 'done' 
+    AND date(completed_at) = ?
+    ORDER BY completed_at
+  `).all(memberId, today);
+  
+  for (const t of doneTasks) {
+    stream.push({
+      id: t.id,
+      type: "task",
+      title: t.title,
+      label: t.title,
+      state: "done",
+      time: t.completed_at,
+      task: {
+        id: t.id,
+        domain: t.domain,
+        effort: t.effort,
+        points: t.points || 1,
+      },
+    });
+  }
 
   // Calendar events as stream items
   for (const e of filteredEvents) {
+    const isPast = e.end_time && new Date(e.end_time) < new Date();
     stream.push({
       id: e.id,
       type: "calendar",
@@ -274,32 +402,53 @@ app.get("/api/today-stream", requireMember, (req, res) => {
       time: e.start_time,
       end: e.end_time,
       label: `${e.start_time} ${e.title}`,
-      state: "pending",
+      state: isPast ? "done" : "pending",
     });
   }
 
-  // Tasks as stream items
+  // Pending tasks (not done)
   for (const t of tasks) {
-    stream.push({
-      id: t.id,
-      type: "task",
-      title: t.title,
-      label: t.title,
-      state: t.status === "done" ? "done" : "pending",
-      urgent: t.due_date && t.due_date <= today && t.status !== "done",
-      task: {
+    if (t.status !== 'done') {
+      stream.push({
         id: t.id,
-        domain: t.domain,
-        effort: t.effort,
-        points: t.points || 1,
-        micro: t.micro_script || null,
-      },
-    });
+        type: "task",
+        title: t.title,
+        label: t.title,
+        state: t.status === "in_progress" ? "current" : "pending",
+        urgent: t.due_date && t.due_date <= today,
+        task: {
+          id: t.id,
+          domain: t.domain,
+          effort: t.effort,
+          points: t.points || 1,
+          micro: t.micro_script || null,
+        },
+      });
+    }
+  }
+  
+  // Sort stream chronologically where possible
+  stream.sort((a, b) => {
+    const aTime = a.time || a.created_at || '00:00';
+    const bTime = b.time || b.created_at || '00:00';
+    return aTime.localeCompare(bTime);
+  });
+
+  // Find active index (current task or next pending)
+  let activeIdx = stream.findIndex(s => s.state === "current");
+  if (activeIdx === -1 && wnResult.the_one_task) {
+    activeIdx = stream.findIndex(s => s.id === wnResult.the_one_task.id);
+  }
+  if (activeIdx === -1) {
+    activeIdx = stream.findIndex(s => s.state === "pending");
+  }
+  if (activeIdx === -1) {
+    activeIdx = stream.length - 1; // Last item if all done
   }
 
   res.json({
     stream,
-    activeIdx: wnResult.the_one_task ? stream.findIndex(s => s.id === wnResult.the_one_task?.id) : 0,
+    activeIdx: Math.max(0, activeIdx),
     energy: energy ? {
       level: energy.energy_level,
       sleep: energy.sleep_quality,
@@ -374,6 +523,61 @@ app.get("/api/schedule", requireMember, (req, res) => {
   res.json({ events: filtered, custody: custody.text || "" });
 });
 
+app.get("/api/calendar/windows", requireMember, (req, res) => {
+  const d = getDB();
+  const dateStr = req.query.date || todayET();
+  const memberId = req.memberId;
+  const minDuration = parseInt(req.query.min_duration || "30", 10); // minutes
+
+  // Get all events for the day that block the member
+  const events = d.prepare(
+    "SELECT start_time, end_time FROM cal_classified_events " +
+    "WHERE event_date = ? AND (for_member_ids = '[]' OR for_member_ids LIKE '%' || ? || '%') " +
+    "ORDER BY start_time"
+  ).all(dateStr, memberId);
+
+  // Find gaps between events
+  const windows = [];
+  const dayStart = "00:00";
+  const dayEnd = "23:59";
+
+  let lastEnd = dayStart;
+  for (const event of events) {
+    if (event.start_time > lastEnd) {
+      const gapMinutes = timeToMinutes(event.start_time) - timeToMinutes(lastEnd);
+      if (gapMinutes >= minDuration) {
+        windows.push({
+          start: lastEnd,
+          end: event.start_time,
+          duration: gapMinutes,
+        });
+      }
+    }
+    if (event.end_time > lastEnd) {
+      lastEnd = event.end_time;
+    }
+  }
+
+  // Final window from last event to end of day
+  if (lastEnd < dayEnd) {
+    const gapMinutes = timeToMinutes(dayEnd) - timeToMinutes(lastEnd);
+    if (gapMinutes >= minDuration) {
+      windows.push({
+        start: lastEnd,
+        end: dayEnd,
+        duration: gapMinutes,
+      });
+    }
+  }
+
+  res.json({ date: dateStr, windows });
+});
+
+function timeToMinutes(timeStr) {
+  const [h, m] = timeStr.split(":").map(Number);
+  return h * 60 + m;
+}
+
 // --- Lists ---
 app.get("/api/lists/:listName", (_req, res) => {
   const d = getDB();
@@ -388,7 +592,61 @@ app.get("/api/lists/:listName", (_req, res) => {
 });
 
 // --- Scoreboard ---
-app.get("/api/scoreboard", (_req, res) => {
+app.get("/api/scoreboard", optionalMember, (req, res) => {
+  const memberId = req.query.member || req.memberId;
+  
+  // If member-specific view requested (e.g., Charlie's scoreboard)
+  if (memberId) {
+    const d = getDB();
+    const today = todayET();
+
+    // Member energy & completions
+    const energy = d.prepare(
+      "SELECT * FROM pib_energy_states WHERE member_id = ? AND state_date = ?"
+    ).get(memberId, today);
+
+    // Streak
+    const streak = d.prepare(
+      "SELECT * FROM ops_streaks WHERE member_id = ? AND streak_type = 'daily_completion'"
+    ).get(memberId);
+
+    // Chores (for Charlie)
+    const chores = d.prepare(
+      "SELECT id, title, status = 'done' as done, points as stars FROM ops_tasks " +
+      "WHERE assignee = ? AND item_type = 'chore' AND due_date = ? " +
+      "ORDER BY created_at"
+    ).all(memberId, today);
+
+    // Week stars
+    const weekStart = new Date(today);
+    weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+    const weekStartStr = weekStart.toISOString().slice(0, 10);
+
+    const weekStars = d.prepare(
+      "SELECT SUM(points) as total FROM ops_tasks " +
+      "WHERE assignee = ? AND item_type = 'chore' AND status = 'done' " +
+      "AND completed_at >= ?"
+    ).get(memberId, weekStartStr);
+
+    return res.json({
+      weekStars: weekStars?.total || 0,
+      streak: streak ? {
+        current: streak.current_streak,
+        best: streak.best_streak,
+        grace: streak.grace_days_used,
+      } : null,
+      nextMilestone: "Pick Friday movie",
+      nextMilestoneTarget: 25,
+      chores: chores.map(c => ({
+        id: c.id,
+        title: c.title,
+        done: !!c.done,
+        stars: c.stars || 1,
+      })),
+    });
+  }
+
+  // Full household scoreboard
   const result = runCLI("scoreboard-data");
   res.json(result);
 });
@@ -397,6 +655,50 @@ app.get("/api/scoreboard", (_req, res) => {
 app.get("/api/budget", (_req, res) => {
   const result = runCLI("budget");
   res.json(result);
+});
+
+// --- Financial Summary ---
+app.get("/api/financial/summary", requireMember, (req, res) => {
+  const d = getDB();
+  const today = todayET();
+  const firstOfMonth = today.slice(0, 8) + "01";
+
+  // Monthly spend by category (from budget config + transactions)
+  const budgetRows = d.prepare(
+    "SELECT * FROM fin_budget_config WHERE active = 1"
+  ).all();
+
+  const categories = [];
+  for (const budget of budgetRows) {
+    const spent = d.prepare(
+      "SELECT SUM(amount) as total FROM fin_transactions " +
+      "WHERE category = ? AND transaction_date >= ? AND transaction_date < date(?, '+1 month')"
+    ).get(budget.category, firstOfMonth, firstOfMonth);
+
+    categories.push({
+      cat: budget.category,
+      target: budget.monthly_target || 0,
+      spent: Math.abs(spent?.total || 0),
+      icon: budget.icon || "💰",
+      warn: spent?.total && Math.abs(spent.total) > (budget.monthly_target * 0.8),
+    });
+  }
+
+  // Upcoming bills
+  const bills = d.prepare(
+    "SELECT * FROM fin_recurring_bills WHERE active = 1 AND next_due_date >= ? ORDER BY next_due_date LIMIT 5"
+  ).all(today);
+
+  // Recent transactions
+  const transactions = d.prepare(
+    "SELECT * FROM fin_transactions ORDER BY transaction_date DESC, created_at DESC LIMIT 10"
+  ).all();
+
+  res.json({
+    categories,
+    upcoming_bills: bills,
+    recent_transactions: transactions,
+  });
 });
 
 // --- Household Status ---
@@ -444,13 +746,140 @@ app.get("/api/chat/history", requireMember, (req, res) => {
   res.json({ messages });
 });
 
+app.get("/api/chat/stream", requireMember, (req, res) => {
+  const sessionId = req.query.session_id;
+  if (!sessionId) {
+    return res.status(400).json({ error: "session_id query param required" });
+  }
+
+  // Set SSE headers
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders();
+
+  // Spawn Python CLI streaming chat process
+  const proc = spawn("python", [
+    "-m", "pib.cli", "chat-stream", DB_PATH,
+    "--session-id", sessionId,
+    "--member", req.memberId
+  ], {
+    cwd: ROOT,
+    env: { ...process.env, PIB_DB_PATH: DB_PATH, PIB_CALLER_AGENT: "cos" }
+  });
+
+  proc.stdout.on("data", (chunk) => {
+    res.write(chunk);
+  });
+
+  proc.stderr.on("data", (chunk) => {
+    console.error("chat-stream stderr:", chunk.toString());
+  });
+
+  proc.on("close", () => {
+    res.end();
+  });
+
+  req.on("close", () => {
+    proc.kill();
+  });
+});
+
 // ═══════════════════════════════════════════════════════════
 // API ROUTES — WRITES (delegated to Python CLI)
 // ═══════════════════════════════════════════════════════════
 
 app.post("/api/tasks/:id/complete", requireMember, (req, res) => {
-  const result = runCLI("task-complete", { task_id: req.params.id }, req.memberId);
-  res.json(result);
+  const taskId = req.params.id;
+  const memberId = req.memberId;
+  const d = getDB();
+  
+  // Get task before completion
+  const task = d.prepare("SELECT * FROM ops_tasks WHERE id = ?").get(taskId);
+  if (!task) {
+    return res.status(404).json({ error: "Task not found" });
+  }
+  
+  // Open writable DB for mutations
+  const wdb = getWriteDB();
+  
+  try {
+    // 1. Complete the task
+    wdb.prepare(`
+      UPDATE ops_tasks 
+      SET status = 'done', completed_at = datetime('now'), completed_by = ?
+      WHERE id = ?
+    `).run(memberId, taskId);
+    
+    // 2. Update velocity (completions today)
+    const today = todayET();
+    wdb.prepare(`
+      INSERT INTO pib_energy_states (member_id, state_date, completions_today, last_completion_at)
+      VALUES (?, ?, 1, datetime('now'))
+      ON CONFLICT(member_id, state_date) DO UPDATE SET
+        completions_today = completions_today + 1,
+        last_completion_at = datetime('now')
+    `).run(memberId, today);
+    
+    // 3. Update streak (elastic with grace days)
+    const streakResult = updateStreak(wdb, memberId, today);
+    
+    // 4. Get completion stats for reward selection
+    const stats = getCompletionStats(wdb, memberId);
+    
+    // Calculate task age in days
+    if (task.created_at) {
+      const createdDate = new Date(task.created_at);
+      task.days_old = Math.floor((new Date() - createdDate) / 86400000);
+    }
+    
+    // 5. Select reward (variable-ratio reinforcement)
+    const { tier, message } = selectReward(memberId, task, stats);
+    
+    // 6. Log reward
+    wdb.prepare(`
+      INSERT INTO pib_reward_log (member_id, task_id, reward_tier, reward_text)
+      VALUES (?, ?, ?, ?)
+    `).run(memberId, taskId, tier, message);
+    
+    // 7. Audit log
+    auditLog(wdb, "task-complete", JSON.stringify({ 
+      task_id: taskId, 
+      title: task.title,
+      reward_tier: tier 
+    }), memberId);
+    
+    // 8. Get whatNow for Zeigarnik hook
+    const snapshot = loadSnapshot(wdb, memberId);
+    const wn = whatNow(memberId, snapshot);
+    const oneMore = wn.one_more_teaser ? generateOneMoreNudge(wn.one_more_teaser) : null;
+    
+    // 9. Momentum check
+    const momentum = shouldShowMomentumNudge(stats.completions_today) 
+      ? generateMomentumMessage(stats.completions_today) 
+      : null;
+    
+    wdb.close();
+    
+    res.json({
+      ok: true,
+      reward_tier: tier,
+      reward_message: message,
+      streak: streakResult,
+      one_more: oneMore,
+      momentum: momentum,
+      stats: {
+        today: stats.completions_today,
+        week: stats.week_completions,
+        streak: streakResult.current
+      }
+    });
+    
+  } catch (err) {
+    wdb.close();
+    console.error("Task completion error:", err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.post("/api/tasks/:id/skip", requireMember, (req, res) => {
@@ -486,7 +915,7 @@ app.post("/api/lists/:listName/items/:id/toggle", requireMember, guardedWrite("l
   res.json({ ok: true, done: !item.checked });
 }));
 
-app.post("/api/chat/send", requireMember, (req, res) => {
+app.post("/api/chat/send", requireMember, rateLimitMiddleware("web_chat"), (req, res) => {
   const result = runCLI("capture", {
     text: req.body.message,
     source: "webchat",
@@ -718,6 +1147,122 @@ app.get("/api/chores", optionalMember, (req, res) => {
   res.json({ chores });
 });
 
+// ═══════════════════════════════════════════════════════════
+// PEOPLE PAGE — Contacts, Comms, Observations, Autonomy Tiers
+// ═══════════════════════════════════════════════════════════
+
+app.get("/api/people/contacts", requireMember, (req, res) => {
+  const d = getDB();
+  const today = todayET();
+
+  // Contacts = household members + external people from comms history
+  const members = d.prepare(
+    "SELECT id, display_name as name, role as type, phone, email, active FROM common_members ORDER BY display_name"
+  ).all();
+
+  // Extract external contacts from ops_comms (people we've communicated with)
+  const externalContacts = d.prepare(
+    "SELECT DISTINCT sender_name as name, sender_handle as phone, " +
+    "MAX(created_at) as last, julianday(?) - julianday(MAX(created_at)) as days " +
+    "FROM ops_comms WHERE sender_name IS NOT NULL AND sender_name != '' " +
+    "GROUP BY sender_name ORDER BY last DESC LIMIT 50"
+  ).all(today);
+
+  const contacts = [
+    ...members.map(m => ({
+      id: m.id,
+      name: m.name,
+      type: m.type,
+      phone: m.phone,
+      email: m.email,
+      last: null,
+      days: null,
+      ghost: false,
+    })),
+    ...externalContacts.map(c => ({
+      id: crypto.randomUUID(),
+      name: c.name,
+      type: "vendor",
+      phone: c.phone,
+      last: c.last,
+      days: Math.floor(c.days),
+      ghost: c.days > 7,
+    }))
+  ];
+
+  res.json({ contacts });
+});
+
+app.get("/api/people/comms", requireMember, (req, res) => {
+  const d = getDB();
+  const limit = parseInt(req.query.limit || "20", 10);
+
+  const comms = d.prepare(
+    "SELECT sender_name as person, channel_id as ch, direction as dir, " +
+    "content as msg, created_at as ts " +
+    "FROM ops_comms ORDER BY created_at DESC LIMIT ?"
+  ).all(limit);
+
+  res.json({ comms });
+});
+
+app.get("/api/people/observations", requireMember, (req, res) => {
+  const d = getDB();
+
+  // Observations = long-term memories with category='observation'
+  const observations = d.prepare(
+    "SELECT content as note, tags, created_at as ts, member_id " +
+    "FROM mem_long_term WHERE category = 'observation' OR category = 'facts' " +
+    "ORDER BY created_at DESC LIMIT 50"
+  ).all();
+
+  // Extract person from tags or content
+  const enriched = observations.map(o => {
+    const tags = o.tags ? JSON.parse(o.tags) : [];
+    const person = tags.find(t => t.startsWith("person:"))?.slice(7) || "General";
+    return {
+      person,
+      note: o.note,
+      ts: o.ts,
+    };
+  });
+
+  res.json({ observations: enriched });
+});
+
+app.get("/api/people/autonomy-tiers", requireMember, (req, res) => {
+  const gov = loadYAML("governance.yaml");
+  const caps = loadYAML("agent_capabilities.yaml");
+
+  // Build autonomy tiers from governance gates
+  const actionGates = gov.action_gates || {};
+  const tiers = [];
+
+  for (const [action, gateValue] of Object.entries(actionGates)) {
+    let level = "Autonomous";
+    let desc = "Do it, log receipt";
+
+    if (gateValue === false || gateValue === "off") {
+      level = "Blocked";
+      desc = "Not permitted";
+    } else if (gateValue === "confirm") {
+      level = "Confirm";
+      desc = "Requires user confirmation";
+    } else if (gateValue === "draft") {
+      level = "Draft";
+      desc = "Create draft for approval";
+    }
+
+    tiers.push({
+      action: action.replace(/_/g, " "),
+      level,
+      desc,
+    });
+  }
+
+  res.json({ tiers });
+});
+
 // (duplicate /api/scoreboard removed — kept the one above near other CLI routes)
 
 // ═══════════════════════════════════════════════════════════
@@ -730,7 +1275,7 @@ app.get("/api/channels", (_req, res) => {
   try {
     const channels = d.prepare(`
       SELECT c.id, c.display_name, c.icon, c.category, c.enabled, c.setup_complete,
-             h.health_status, h.last_check, h.consecutive_failures
+             h.status, h.last_poll_at, h.consecutive_failures
       FROM comms_channels c
       LEFT JOIN comms_channel_health h ON h.channel_id = c.id
       ORDER BY c.category, c.display_name
@@ -746,27 +1291,28 @@ app.get("/api/channels/:id", (req, res) => {
   const d = getDB();
   try {
     const channel = d.prepare(`
-      SELECT c.*, h.health_status, h.last_check, h.consecutive_failures,
-             h.last_error, h.avg_latency_ms
+      SELECT c.*, h.status, h.last_poll_at, h.consecutive_failures,
+             h.last_error, h.last_error
       FROM comms_channels c
       LEFT JOIN comms_channel_health h ON h.channel_id = c.id
       WHERE c.id = ?
     `).get(req.params.id);
     if (!channel) return res.status(404).json({ error: "Channel not found" });
 
-    // Get capabilities
+    // Get capabilities - table doesn't exist in schema, capabilities are in channel.config_json
     let capabilities = [];
-    try {
-      capabilities = d.prepare(
-        "SELECT capability FROM comms_channel_capabilities WHERE channel_id = ?"
-      ).all(req.params.id);
-    } catch { /* table may not exist */ }
+    if (channel.config_json) {
+      try {
+        const config = JSON.parse(channel.config_json);
+        capabilities = config.capabilities || [];
+      } catch { /* invalid JSON */ }
+    }
 
-    // Get member access
+    // Get member access (correct table name: comms_channel_member_access)
     let memberAccess = [];
     try {
       memberAccess = d.prepare(
-        "SELECT member_id, access_level FROM comms_channel_members WHERE channel_id = ?"
+        "SELECT member_id, access_level FROM comms_channel_member_access WHERE channel_id = ?"
       ).all(req.params.id);
     } catch { /* table may not exist */ }
 
@@ -782,7 +1328,7 @@ app.get("/api/channels/:id/inbox", requireMember, (req, res) => {
   try {
     const items = d.prepare(`
       SELECT * FROM ops_comms
-      WHERE channel_id = ? AND member_id = ?
+      WHERE channel = ? AND member_id = ?
       ORDER BY created_at DESC LIMIT 100
     `).all(req.params.id, req.memberId);
     res.json({ items });
@@ -807,12 +1353,12 @@ app.post("/api/channels/:id/disable", requireMember, (req, res) => {
 app.get("/api/comms/inbox", requireMember, (req, res) => {
   const d = getDB();
   const batchWindow = req.query.batch_window || null;
-  const status = req.query.status || null;
+  const outcome = req.query.outcome || req.query.status || null; // support both params
   try {
     let sql = `
       SELECT oc.*, cc.display_name as channel_name, cc.icon as channel_icon
       FROM ops_comms oc
-      LEFT JOIN comms_channels cc ON cc.id = oc.channel_id
+      LEFT JOIN comms_channels cc ON cc.id = oc.channel
       WHERE oc.member_id = ?
     `;
     const params = [req.memberId];
@@ -821,9 +1367,9 @@ app.get("/api/comms/inbox", requireMember, (req, res) => {
       sql += " AND oc.batch_window = ?";
       params.push(batchWindow);
     }
-    if (status) {
-      sql += " AND oc.status = ?";
-      params.push(status);
+    if (outcome) {
+      sql += " AND oc.outcome = ?";
+      params.push(outcome);
     }
 
     sql += " ORDER BY oc.created_at DESC LIMIT 200";
@@ -881,7 +1427,7 @@ function privacyFilter(memberId) {
 
 // --- Sensor Ingest ---
 // POST /api/sensors/ingest — validates Bearer token, routes to Python CLI
-app.post("/api/sensors/ingest", (req, res) => {
+app.post("/api/sensors/ingest", rateLimitMiddleware("siri"), (req, res) => {
   if (!validateBearerToken(req)) {
     return res.status(401).json({ error: "Invalid or missing Bearer token" });
   }
@@ -908,7 +1454,7 @@ app.post("/api/sensors/ingest", (req, res) => {
 
 // --- BlueBubbles Webhook (per-bridge) ---
 // POST /api/webhooks/bluebubbles/:bridgeId — validates per-bridge secret, forces member_id
-app.post("/api/webhooks/bluebubbles/:bridgeId", (req, res) => {
+app.post("/api/webhooks/bluebubbles/:bridgeId", rateLimitMiddleware("bluebubbles"), (req, res) => {
   const bridgeId = req.params.bridgeId.toLowerCase();
 
   // Map bridge_id to member_id
@@ -944,7 +1490,7 @@ app.post("/api/webhooks/bluebubbles/:bridgeId", (req, res) => {
 
 // --- Task Capture ---
 // POST /api/capture/task — validates Bearer token, routes to Python CLI
-app.post("/api/capture/task", (req, res) => {
+app.post("/api/capture/task", rateLimitMiddleware("siri"), (req, res) => {
   if (!validateBearerToken(req)) {
     return res.status(401).json({ error: "Invalid or missing Bearer token" });
   }

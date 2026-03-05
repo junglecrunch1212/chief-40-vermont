@@ -25,18 +25,23 @@
 body{background:var(--bg);color:var(--tx);font-family:var(--body);-webkit-font-smoothing:antialiased;font-size:14px;line-height:1.5}
 @keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+@keyframes glow{0%,100%{box-shadow:0 0 0 0 rgba(232,160,191,0.15)}50%{box-shadow:0 0 0 8px rgba(232,160,191,0.15)}}
 .fi{animation:fadeUp .4s ease-out}
 .card{background:var(--bg-card);border:1px solid var(--bd);border-radius:var(--r);padding:20px;box-shadow:var(--shc);transition:border-color .2s}
 .card:hover{border-color:var(--bd2)}
 .card-flat{background:var(--bg-card);border:1px solid var(--bd);border-radius:var(--r);padding:20px}
+.card-active{animation:glow 2s ease-in-out infinite}
 input,textarea,select{background:var(--bg-input);border:1px solid var(--bd);border-radius:var(--rs);color:var(--tx);font-family:var(--body);font-size:14px;padding:10px 14px;outline:none;width:100%;transition:border-color .2s}
 input:focus,select:focus,textarea:focus{border-color:var(--pink);box-shadow:0 0 0 3px rgba(232,160,191,0.15)}
 button{font-family:var(--body);cursor:pointer;border:none;border-radius:var(--rs);font-size:14px;font-weight:500;padding:10px 18px;transition:all .15s ease}
-.btn-p{background:var(--pink);color:#fff}.btn-p:hover{background:#D990B0;transform:translateY(-1px);box-shadow:0 4px 12px rgba(232,160,191,0.3)}
-.btn-s{background:transparent;color:var(--tx2);border:1px solid var(--bd)}.btn-s:hover{border-color:var(--bd2);background:var(--bg-hover)}
-.btn-g{background:var(--grn);color:#fff}.btn-g:hover{background:#6DAA80}
-.btn-d{background:var(--err-bg);color:var(--err)}.btn-d:hover{background:rgba(212,117,107,0.18)}
+button:disabled{opacity:.5;cursor:not-allowed}
+.btn-p{background:var(--pink);color:#fff}.btn-p:hover:not(:disabled){background:#D990B0;transform:translateY(-1px);box-shadow:0 4px 12px rgba(232,160,191,0.3)}
+.btn-s{background:transparent;color:var(--tx2);border:1px solid var(--bd)}.btn-s:hover:not(:disabled){border-color:var(--bd2);background:var(--bg-hover)}
+.btn-g{background:var(--grn);color:#fff}.btn-g:hover:not(:disabled){background:#6DAA80}
+.btn-d{background:var(--err-bg);color:var(--err)}.btn-d:hover:not(:disabled){background:rgba(212,117,107,0.18)}
 .btn-sm{padding:6px 14px;font-size:13px}
+.btn-y{background:var(--grn);color:#fff;padding:8px 20px;font-weight:600}.btn-y:hover:not(:disabled){background:#6DAA80}
+.btn-n{background:var(--err-bg);color:var(--err);padding:8px 20px;font-weight:600}.btn-n:hover:not(:disabled){background:rgba(212,117,107,0.18)}
 .badge{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:600;letter-spacing:.3px;padding:4px 10px;border-radius:20px}
 .badge-pink{background:var(--pink-bg);color:var(--pink)}
 .badge-lav{background:var(--lav-bg);color:var(--lav)}
@@ -67,19 +72,37 @@ tbody tr:hover{background:var(--bg-hover)}
 .section-label{font-size:11px;font-weight:600;color:var(--tx3);letter-spacing:.5px;text-transform:uppercase;margin-bottom:12px}
 .spinner{width:32px;height:32px;border-radius:50%;border:3px solid var(--bd);border-top-color:var(--pink);animation:pulse 1s infinite;margin:60px auto}
 ::-webkit-scrollbar{width:6px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--bd);border-radius:3px}
+.degraded-banner{background:var(--warn-bg);color:#B8943D;padding:12px 20px;border-radius:10px;margin-bottom:20px;display:flex;align-items:center;gap:12px;font-size:13px;font-weight:500;border:1px solid var(--warn)}
+.progress-dots{display:flex;gap:6px;overflow-x:auto;padding:12px 0;margin-bottom:16px}
+.dot{width:10px;height:10px;border-radius:50%;cursor:pointer;transition:all .2s;flex-shrink:0}
+.dot-endowed{background:var(--tx4);opacity:.5}
+.dot-done{background:var(--grn)}
+.dot-skipped{background:var(--warn)}
+.dot-current{background:var(--pink);width:14px;height:14px;animation:pulse 2s infinite}
+.dot-urgent{background:var(--err)}
+.dot-pending{background:var(--bd2)}
+.tv-scoreboard{background:#1A1714;color:#F5F0EA;min-height:100vh;padding:60px;font-size:18px}
+.tv-scoreboard .huge{font-size:72px;font-weight:700;font-family:var(--head)}
+.tv-scoreboard .big{font-size:48px;font-weight:600}
+.tv-scoreboard .med{font-size:32px}
+.child-view .sidebar{display:none!important}
+.child-view .main{padding:0!important}
 </style>
 </head>
 <body>
-<div class="shell">
+<div id="degraded-warn" style="display:none" class="degraded-banner">
+  ⚠️ Showing cached data — connection to backend lost
+</div>
+<div class="shell" id="shell">
   <nav class="sidebar" id="sidebar"></nav>
   <main class="main" id="main"></main>
 </div>
 <script>
 // ── State ──
 const MEMBERS = [
-  { id:'m-james', name:'James', role:'parent', emoji:'\uD83D\uDCAA' },
-  { id:'m-laura', name:'Laura', role:'parent', emoji:'\u2696\uFE0F' },
-  { id:'m-charlie', name:'Charlie', role:'child', emoji:'\uD83C\uDF1F', age:6 },
+  { id:'m-james', name:'James', role:'parent', emoji:'\uD83D\uDCAA', viewMode:'carousel' },
+  { id:'m-laura', name:'Laura', role:'parent', emoji:'\u2696\uFE0F', viewMode:'compressed' },
+  { id:'m-charlie', name:'Charlie', role:'child', emoji:'\uD83C\uDF1F', age:6, viewMode:'child' },
 ];
 const NAV = [
   { id:'today', icon:'sun', label:'Today' },
@@ -94,8 +117,8 @@ const NAV = [
 ];
 const HIDDEN_FOR_CHILD = ['tasks','people','settings'];
 const DOMAIN_BADGE = {household:'badge-lav',health:'badge-teal',finance:'badge-warn',family:'badge-pink',work:'badge-info',admin:'badge-grn'};
-const SETTINGS_TABS = ['health','costs','models','sources','phases','config','budget','household','channels','permissions','coaching','gates','memory'];
-const SETTINGS_LABELS = {health:'System Health',costs:'Costs',models:'AI Models',sources:'Sources',phases:'Life Phases',config:'Config',budget:'Budget',household:'Household',channels:'Channels',permissions:'Permissions',coaching:'Coaching',gates:'Gates',memory:'Memory'};
+const SETTINGS_TABS = ['health','costs','models','sources','phases','config','budget','household','permissions','coaching','gates','memory'];
+const SETTINGS_LABELS = {health:'System Health',costs:'Costs',models:'AI Models',sources:'Sources',phases:'Life Phases',config:'Config',budget:'Budget',household:'Household',permissions:'Permissions',coaching:'Coaching',gates:'Gates',memory:'Memory'};
 
 let currentPage = 'today';
 let currentActor = localStorage.getItem('pib-actor') || 'm-james';
@@ -103,6 +126,39 @@ let settingsTab = 'health';
 let chatSessionId = 'sess-' + Date.now();
 let chatMessages = [];
 let chatStreaming = false;
+let degradedMode = false;
+let lastKnownData = {};
+let streamIndex = 0;
+
+// Check for hash-based routing (TV scoreboard)
+if (window.location.hash === '#scoreboard' || window.location.hash === '#/scoreboard') {
+  renderTVScoreboard();
+} else {
+  initApp();
+}
+
+function initApp() {
+  renderSidebar();
+  renderPage();
+  // Health polling
+  setInterval(async()=>{
+    try {
+      const h = await GET('/api/health');
+      if (degradedMode) { degradedMode = false; document.getElementById('degraded-warn').style.display='none'; }
+      const pill = document.getElementById('health-pill');
+      if(pill) { 
+        const ok=h.status==='healthy'; 
+        pill.style.background=ok?'var(--grn-bg)':'var(--err-bg)'; 
+        pill.innerHTML=`<div style="width:7px;height:7px;border-radius:50%;background:${ok?'var(--grn)':'var(--err)'};animation:pulse 2s infinite"></div><span style="font-size:12px;color:${ok?'var(--grn)':'var(--err)'};font-weight:500">${ok?'System Healthy':'System Unhealthy'}</span>`; 
+      }
+    } catch{ 
+      if(!degradedMode){ 
+        degradedMode=true; 
+        document.getElementById('degraded-warn').style.display='flex'; 
+      } 
+    }
+  }, 300000); // 5 min
+}
 
 // ── API Layer ──
 async function api(path, opts = {}) {
@@ -133,12 +189,47 @@ const ICONS = {
 function esc(s) { const d=document.createElement('div'); d.textContent=s||''; return d.innerHTML; }
 function memberName(id) { return MEMBERS.find(m=>m.id===id)?.name || '\u2014'; }
 function todayISO() { return new Date().toISOString().split('T')[0]; }
-function greeting() { return new Date().getHours()<12?'Good morning':'Good afternoon'; }
+function greeting() { const h=new Date().getHours(); return h<12?'Good morning':h<18?'Good afternoon':'Good evening'; }
 function loading(label) { return `<div style="text-align:center;padding:60px"><div class="spinner"></div>${label?`<div style="margin-top:12px;font-size:13px;color:var(--tx3)">${esc(label)}</div>`:''}</div>`; }
+
+// ── Keyboard Nav ──
+document.addEventListener('keydown', (e) => {
+  if (currentPage !== 'today' || currentActor !== 'm-james') return;
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  
+  if (e.key === 'ArrowRight') { e.preventDefault(); navigateStream(1); }
+  else if (e.key === 'ArrowLeft') { e.preventDefault(); navigateStream(-1); }
+  else if (e.key === 'Enter') { e.preventDefault(); completeCurrentStream(); }
+  else if (e.key === 'Escape') { e.preventDefault(); skipCurrentStream(); }
+});
+
+function navigateStream(delta) {
+  const stream = lastKnownData.todayStream?.stream || [];
+  streamIndex = Math.max(0, Math.min(stream.length - 1, streamIndex + delta));
+  renderPage();
+}
+
+function completeCurrentStream() {
+  const stream = lastKnownData.todayStream?.stream || [];
+  const item = stream[streamIndex];
+  if (item && item.type === 'task' && item.task?.id) {
+    completeFromStream(item.task.id);
+  }
+}
+
+function skipCurrentStream() {
+  const stream = lastKnownData.todayStream?.stream || [];
+  const item = stream[streamIndex];
+  if (item && item.type === 'task' && item.task?.id) {
+    skipFromStream(item.task.id);
+  }
+}
 
 // ── Render Sidebar ──
 function renderSidebar() {
   const actor = MEMBERS.find(m=>m.id===currentActor);
+  const isChild = actor?.viewMode === 'child';
+  
   let h = `
     <div style="padding:0 20px 20px;border-bottom:1px solid var(--bd);margin-bottom:12px">
       <div style="display:flex;align-items:center;gap:12px">
@@ -153,8 +244,9 @@ function renderSidebar() {
       </div>
     </div>
     <div style="flex:1;padding:0 10px;overflow:auto">`;
+  
   for (const n of NAV) {
-    if (currentActor==='m-charlie' && HIDDEN_FOR_CHILD.includes(n.id)) continue;
+    if (isChild && HIDDEN_FOR_CHILD.includes(n.id)) continue;
     h += `<button class="nav-btn ${n.id===currentPage?'active':''}" onclick="navigate('${n.id}')">
       <span class="nav-icon">${ICONS[n.icon]||''}${n.label}</span>
     </button>`;
@@ -169,18 +261,344 @@ function renderSidebar() {
   document.getElementById('sidebar').innerHTML = h;
 }
 
-function switchActor(id) { currentActor=id; localStorage.setItem('pib-actor',id); renderSidebar(); renderPage(); }
-function navigate(page) { currentPage=page; if(currentActor==='m-charlie'&&HIDDEN_FOR_CHILD.includes(page)) currentPage='today'; renderSidebar(); renderPage(); }
+function switchActor(id) { 
+  currentActor=id; 
+  localStorage.setItem('pib-actor',id); 
+  const actor = MEMBERS.find(m=>m.id===id);
+  const shell = document.getElementById('shell');
+  if (actor?.viewMode === 'child') {
+    shell.classList.add('child-view');
+  } else {
+    shell.classList.remove('child-view');
+  }
+  renderSidebar(); 
+  renderPage(); 
+}
+
+function navigate(page) { 
+  currentPage=page; 
+  const actor=MEMBERS.find(m=>m.id===currentActor); 
+  if(actor?.viewMode==='child'&&HIDDEN_FOR_CHILD.includes(page)) currentPage='today'; 
+  renderSidebar(); 
+  renderPage(); 
+}
 
 // ── Page Router ──
 function renderPage() {
   const m = document.getElementById('main');
   m.innerHTML = loading('Loading...');
-  const pages = {today:renderToday,tasks:renderTasks,schedule:renderSchedule,lists:renderLists,comms:renderComms,chat:renderChat,scoreboard:renderScoreboard,people:renderPeople,settings:renderSettings};
+  const actor = MEMBERS.find(a=>a.id===currentActor);
+  
+  // Route based on view mode for TODAY page
+  if (currentPage === 'today') {
+    if (actor?.viewMode === 'carousel') return renderTodayJames();
+    if (actor?.viewMode === 'compressed') return renderTodayLaura();
+    if (actor?.viewMode === 'child') return renderTodayCharlie();
+  }
+  
+  const pages = {
+    today:renderToday,
+    tasks:renderTasks,
+    schedule:renderSchedule,
+    lists:renderLists,
+    comms:renderComms,
+    chat:renderChat,
+    scoreboard:renderScoreboard,
+    people:renderPeople,
+    settings:renderSettings
+  };
   (pages[currentPage]||renderToday)();
 }
 
-// ── TODAY ──
+// ── TODAY — James Carousel ──
+async function renderTodayJames() {
+  const m = document.getElementById('main');
+  try {
+    const data = await GET(`/api/today-stream?member=${currentActor}`);
+    lastKnownData.todayStream = data;
+    const stream = data.stream||[];
+    const energy = data.energy||{level:'medium',meds:false,sleep:'okay',completions:0,cap:15};
+    const streak = data.streak||{current:0,best:0,grace:0};
+    const activeIdx = data.activeIdx ?? streamIndex;
+    streamIndex = activeIdx;
+    
+    const currentItem = stream[activeIdx];
+    const doneCount = stream.filter(s=>s.state==='done'&&s.type!=='endowed').length;
+    
+    // Next 3 calendar events within 2h window
+    const now = new Date();
+    const twoHoursLater = new Date(now.getTime() + 2*60*60*1000);
+    const upcomingCal = stream.filter(s => {
+      if (s.type !== 'calendar' || s.state === 'done') return false;
+      if (!s.time) return false;
+      const [hh,mm] = s.time.split(':').map(Number);
+      const eventTime = new Date(now);
+      eventTime.setHours(hh, mm, 0, 0);
+      return eventTime > now && eventTime <= twoHoursLater;
+    }).slice(0, 3);
+    
+    // Progress dots with 6 states
+    const dots = stream.map((s,i) => {
+      let cls = 'dot-pending';
+      if (s.state === 'done') cls = s.type === 'endowed' ? 'dot-endowed' : 'dot-done';
+      else if (s.state === 'skipped') cls = 'dot-skipped';
+      else if (i === activeIdx) cls = 'dot-current';
+      else if (s.urgent || (s.type==='task' && s.task?.urgent)) cls = 'dot-urgent';
+      return `<div class="dot ${cls}" onclick="streamIndex=${i};renderPage()" title="${esc(s.label||s.title||'')}"></div>`;
+    }).join('');
+    
+    m.innerHTML = `<div class="fi" style="max-width:640px;margin:0 auto">
+      <div style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap">
+        <div style="padding:8px 14px;background:var(--bg-card);border:1px solid var(--bd);border-radius:10px;display:flex;align-items:center;gap:8px">
+          <span style="font-size:13px;font-weight:600;color:${energy.meds?'var(--grn)':'var(--warn)'}">${energy.meds?'✓ Meds':'⏰ Meds'}</span>
+          ${energy.meds_at?`<span style="font-size:11px;color:var(--tx3)">${esc(energy.meds_at)}</span>`:''}
+        </div>
+        <div style="padding:8px 14px;background:var(--bg-card);border:1px solid var(--bd);border-radius:10px;display:flex;align-items:center;gap:8px">
+          <span style="font-size:13px;font-weight:600;text-transform:capitalize">${esc(energy.level)}</span>
+          <span style="font-size:10px;color:var(--tx3);text-transform:uppercase;letter-spacing:.3px">Energy</span>
+        </div>
+        <div style="padding:8px 14px;background:var(--bg-card);border:1px solid var(--bd);border-radius:10px;display:flex;align-items:center;gap:8px">
+          <span style="font-size:13px;font-weight:600">${doneCount}/${energy.cap||15}</span>
+          <span style="font-size:10px;color:var(--tx3);text-transform:uppercase;letter-spacing:.3px">Velocity</span>
+        </div>
+        <div style="padding:8px 14px;background:var(--bg-card);border:1px solid var(--bd);border-radius:10px;display:flex;align-items:center;gap:8px">
+          <span style="font-size:13px;font-weight:600">🔥 ${streak.current}</span>
+          <span style="font-size:10px;color:var(--tx3);text-transform:uppercase;letter-spacing:.3px">Streak</span>
+          ${streak.grace>0?`<span style="font-size:10px;color:var(--warn)">+${streak.grace} grace</span>`:''}
+        </div>
+      </div>
+      
+      <h1 style="font-size:28px;font-weight:600;font-family:var(--head);letter-spacing:-.5px;line-height:1.2">${greeting()}, James</h1>
+      <p style="font-size:15px;color:var(--tx2);margin-top:6px">${data.summary||''}</p>
+      
+      <div style="display:flex;justify-content:center;align-items:center;gap:8px;margin:16px 0 8px">
+        <span style="font-size:12px;color:var(--tx3);font-family:var(--mono)">${activeIdx+1} / ${stream.length}</span>
+      </div>
+      <div class="progress-dots">${dots}</div>
+      
+      ${currentItem ? `
+        <div class="card ${currentItem.state==='current' || activeIdx === streamIndex ? 'card-active' : ''}" style="padding:24px;margin-bottom:20px">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
+            <div style="flex:1">
+              <div style="font-size:20px;font-weight:600;line-height:1.3;margin-bottom:8px">${esc(currentItem.title||currentItem.label||'')}</div>
+              ${currentItem.type==='task' && currentItem.task?.domain ? `<span class="badge ${DOMAIN_BADGE[currentItem.task.domain]||'badge-info'}">${esc(currentItem.task.domain)}</span>` : ''}
+              ${currentItem.type==='calendar' ? `<div style="font-size:13px;color:var(--tx3);margin-top:4px">📅 ${esc(currentItem.time||'')} – ${esc(currentItem.end||'')}</div>` : ''}
+              ${currentItem.type==='task' && currentItem.task?.effort ? `<span class="badge badge-lav" style="margin-left:6px">${esc(currentItem.task.effort)}</span>` : ''}
+            </div>
+            ${currentItem.type==='task' && currentItem.task?.points ? `<div style="font-size:24px;font-weight:700;color:var(--pink);font-family:var(--head)">+${currentItem.task.points}</div>` : ''}
+          </div>
+          
+          ${currentItem.type==='task' && currentItem.task?.micro ? `
+            <div style="background:var(--pink-bg2);border-left:3px solid var(--pink);padding:14px 16px;border-radius:8px;margin:16px 0">
+              <div style="font-size:11px;font-weight:600;color:var(--pink);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Micro-Script</div>
+              <div style="font-size:14px;line-height:1.6;color:var(--tx)">${esc(currentItem.task.micro)}</div>
+            </div>
+          ` : ''}
+          
+          ${currentItem.type==='task' && currentItem.state==='pending' ? `
+            <div style="display:flex;gap:10px;margin-top:16px">
+              <button class="btn-g" onclick="completeFromStream('${esc(currentItem.task?.id||currentItem.id)}')">✅ Done</button>
+              <button class="btn-d" onclick="skipFromStream('${esc(currentItem.task?.id||currentItem.id)}')">→ Skip</button>
+            </div>
+          ` : ''}
+          
+          ${currentItem.state==='done' ? `<div style="padding:12px;background:var(--grn-bg);border-radius:8px;color:var(--grn);font-weight:500;text-align:center;margin-top:12px">✓ Completed</div>` : ''}
+          
+          ${lastKnownData.rewardMessage ? `
+            <div style="margin-top:16px;padding:12px 16px;background:var(--pink-bg2);border-radius:8px;font-size:14px;color:var(--pink);font-weight:500;text-align:center">
+              ${esc(lastKnownData.rewardMessage)}
+            </div>
+          ` : ''}
+        </div>
+      ` : ''}
+      
+      ${upcomingCal.length > 0 ? `
+        <div style="background:var(--bg-card);border:1px solid var(--bd);border-radius:var(--r);padding:16px;margin-bottom:20px">
+          <div style="font-size:11px;font-weight:600;color:var(--tx3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">⏰ NEXT UP</div>
+          ${upcomingCal.map(ev => {
+            const [hh,mm] = (ev.time||'').split(':').map(Number);
+            const eventTime = new Date(now);
+            eventTime.setHours(hh, mm, 0, 0);
+            const minUntil = Math.round((eventTime - now) / 60000);
+            return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--bd)">
+              <div><span style="font-family:var(--mono);font-size:13px;color:var(--tx2)">${esc(ev.time||'')}</span> <span style="font-size:14px">${esc(ev.title||'')}</span></div>
+              <span style="font-size:12px;color:var(--tx3)">${minUntil}m</span>
+            </div>`;
+          }).join('')}
+        </div>
+      ` : ''}
+      
+      <div style="text-align:center;font-size:12px;color:var(--tx4);margin-top:20px">
+        Use ← → to navigate, Enter to complete, Esc to skip
+      </div>
+    </div>`;
+  } catch(e) { 
+    if (lastKnownData.todayStream && degradedMode) {
+      renderTodayJames();
+    } else {
+      m.innerHTML = `<div class="fi"><h1 class="page-title">${greeting()}, James</h1><div class="card-flat" style="text-align:center;padding:48px;color:var(--tx3)">Could not load today stream.</div></div>`; 
+    }
+  }
+}
+
+async function completeFromStream(taskId) {
+  try { 
+    const res = await POST(`/api/tasks/${taskId}/complete`, {member:currentActor}); 
+    if (res.next_active_idx !== undefined) streamIndex = res.next_active_idx;
+    // Store reward message
+    if (res.reward_message) {
+      lastKnownData.rewardMessage = res.reward_message;
+      setTimeout(() => { lastKnownData.rewardMessage = null; renderPage(); }, 5000);
+    }
+    renderPage(); 
+  } catch(e) { console.error(e); }
+}
+
+async function skipFromStream(taskId) {
+  const reschedule = prompt('Skip — reschedule for when? (YYYY-MM-DD or leave blank)');
+  try { 
+    await POST(`/api/tasks/${taskId}/skip`, reschedule ? {reschedule_date: reschedule} : {}); 
+    streamIndex++;
+    renderPage(); 
+  } catch(e) { console.error(e); }
+}
+
+// ── TODAY — Laura Compressed ──
+async function renderTodayLaura() {
+  const m = document.getElementById('main');
+  try {
+    const [decisions, tasks, status] = await Promise.all([
+      GET(`/api/decisions?member=${currentActor}`),
+      GET(`/api/tasks?assignee=${currentActor}&status=ready`),
+      GET('/api/household-status')
+    ]);
+    lastKnownData.todayLaura = { decisions, tasks, status };
+    
+    const dec = decisions.decisions || [];
+    const myTasks = tasks.tasks || [];
+    const statusItems = status.items || [];
+    
+    m.innerHTML = `<div class="fi" style="max-width:700px;margin:0 auto">
+      <h1 class="page-title">${greeting()}, Laura</h1>
+      
+      ${dec.length > 0 ? `
+        <div class="card-flat" style="margin-bottom:20px">
+          <div class="section-label">Decisions Needed</div>
+          ${dec.map(d => `
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 0;border-bottom:1px solid var(--bd)">
+              <div>
+                <div style="font-weight:500;font-size:15px">${esc(d.title)}</div>
+                <div style="font-size:13px;color:var(--tx3);margin-top:2px">${esc(d.detail||'')}</div>
+              </div>
+              <div style="display:flex;gap:8px">
+                <button class="btn-y" onclick="decideApproval('${esc(d.id)}','approved')">Y</button>
+                <button class="btn-n" onclick="decideApproval('${esc(d.id)}','rejected')">N</button>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      ` : ''}
+      
+      ${myTasks.length > 0 ? `
+        <div class="card-flat" style="margin-bottom:20px">
+          <div class="section-label">Your Tasks (${myTasks.length})</div>
+          ${myTasks.map((t,i) => `
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;${i?'border-top:1px solid var(--bd)':''}">
+              <div>
+                <div style="font-weight:500">${esc(t.title)}</div>
+                ${t.due ? `<div style="font-size:12px;color:var(--tx3)">Due ${esc(t.due)}</div>` : ''}
+              </div>
+              <span class="badge ${DOMAIN_BADGE[t.domain]||'badge-info'}">${esc(t.domain||'')}</span>
+            </div>
+          `).join('')}
+        </div>
+      ` : ''}
+      
+      <div class="card-flat">
+        <div class="section-label">Household Status</div>
+        ${statusItems.map((it,i) => `
+          <div style="display:flex;align-items:center;gap:12px;padding:10px 0;${i?'border-top:1px solid var(--bd)':''}">
+            <span style="font-size:20px">${it.icon||''}</span>
+            <span style="font-size:14px;color:${it.color||'var(--tx2)'}">${esc(it.text||'')}</span>
+          </div>
+        `).join('')}
+      </div>
+    </div>`;
+  } catch(e) { 
+    if (lastKnownData.todayLaura && degradedMode) {
+      renderTodayLaura();
+    } else {
+      m.innerHTML = `<div class="fi"><h1 class="page-title">${greeting()}, Laura</h1><div class="card-flat" style="text-align:center;padding:48px;color:var(--tx3)">Could not load today data.</div></div>`; 
+    }
+  }
+}
+
+async function decideApproval(id, decision) {
+  try {
+    await POST(`/api/approvals/${id}/decide`, { decision });
+    renderPage();
+  } catch(e) { console.error(e); }
+}
+
+// ── TODAY — Charlie Child View ──
+async function renderTodayCharlie() {
+  const m = document.getElementById('main');
+  try {
+    const [chores, scoreboard] = await Promise.all([
+      GET(`/api/chores?member=${currentActor}`),
+      GET(`/api/scoreboard?member=${currentActor}`)
+    ]);
+    lastKnownData.todayCharlie = { chores, scoreboard };
+    const choresList = chores.chores || [];
+    const doneCount = choresList.filter(c=>c.done).length;
+    const totalStars = choresList.filter(c=>c.done).reduce((sum,c)=>(sum+(c.stars||0)), 0);
+    const sb = scoreboard || {};
+    
+    m.innerHTML = `<div style="background:#1A1714;color:#F5F0EA;min-height:100vh;padding:40px;text-align:center">
+      <div style="font-size:48px;font-weight:700;font-family:var(--head);margin-bottom:20px">⭐ Charlie's Board ⭐</div>
+      
+      <div style="font-size:32px;margin-bottom:10px">Today: ${totalStars} ⭐</div>
+      <div style="font-size:24px;color:rgba(245,240,234,0.7);margin-bottom:30px">🔥 ${sb.streak?.current||0} day streak</div>
+      
+      ${sb.nextMilestone ? `
+        <div style="background:rgba(232,160,191,0.15);border:2px solid #E8A0BF;border-radius:16px;padding:20px;margin-bottom:30px;max-width:500px;margin-left:auto;margin-right:auto">
+          <div style="font-size:18px;margin-bottom:8px">Next Reward</div>
+          <div style="font-size:28px;font-weight:600">${esc(sb.nextMilestone)}</div>
+          <div style="font-size:16px;color:rgba(245,240,234,0.7);margin-top:8px">${sb.weekStars||0} / ${sb.nextMilestoneTarget||25} ⭐</div>
+        </div>
+      ` : ''}
+      
+      <div style="max-width:600px;margin:0 auto;display:grid;gap:16px">
+        ${choresList.map(ch => `
+          <div onclick="toggleChore('${esc(ch.id)}')" style="background:${ch.done?'rgba(124,185,143,0.2)':'rgba(232,160,191,0.1)'};border:2px solid ${ch.done?'#7CB98F':'#E8A0BF'};border-radius:16px;padding:24px;cursor:pointer;transition:all .2s;display:flex;justify-content:space-between;align-items:center">
+            <div style="display:flex;align-items:center;gap:16px">
+              <div style="width:36px;height:36px;border-radius:50%;border:3px solid ${ch.done?'#7CB98F':'#E8A0BF'};background:${ch.done?'#7CB98F':'transparent'};display:flex;align-items:center;justify-content:center;font-size:24px">${ch.done?'✓':''}</div>
+              <span style="font-size:24px;font-weight:600;${ch.done?'text-decoration:line-through;opacity:0.7':''}">${esc(ch.title)}</span>
+            </div>
+            <span style="font-size:28px">+${ch.stars||0} ⭐</span>
+          </div>
+        `).join('')}
+      </div>
+      
+      <div style="margin-top:40px;font-size:20px;color:rgba(245,240,234,0.7)">Done ${doneCount} of ${choresList.length} chores</div>
+    </div>`;
+  } catch(e) { 
+    if (lastKnownData.todayCharlie && degradedMode) {
+      renderTodayCharlie();
+    } else {
+      m.innerHTML = `<div style="background:#1A1714;color:#F5F0EA;min-height:100vh;padding:40px;text-align:center"><div style="font-size:32px;margin-top:60px">Could not load chores</div></div>`; 
+    }
+  }
+}
+
+async function toggleChore(id) {
+  try {
+    await POST(`/api/chores/${id}/toggle`, {});
+    renderPage();
+  } catch(e) { console.error(e); }
+}
+
+// ── Generic TODAY fallback ──
 async function renderToday() {
   const m = document.getElementById('main');
   try {
@@ -210,10 +628,7 @@ async function renderToday() {
           </div>`).join('')}
       </div>
     </div>`;
-  } catch(e) { m.innerHTML = `<div class="fi"><h1 class="page-title">${greeting()}, ${esc(memberName(currentActor))}</h1><div class="card-flat" style="text-align:center;padding:48px;color:var(--tx3)">Could not load today stream. Backend may be starting up.</div></div>`; }
-}
-async function completeFromStream(taskId) {
-  try { await POST(`/api/tasks/${taskId}/complete`, {member:currentActor}); renderToday(); } catch(e) { console.error(e); }
+  } catch(e) { m.innerHTML = `<div class="fi"><h1 class="page-title">${greeting()}, ${esc(memberName(currentActor))}</h1><div class="card-flat" style="text-align:center;padding:48px;color:var(--tx3)">Could not load today stream.</div></div>`; }
 }
 
 // ── TASKS ──
@@ -284,7 +699,7 @@ async function renderSchedule() {
 async function renderLists() {
   const m = document.getElementById('main');
   let listTab = 'grocery';
-  const tabDefs = [{id:'grocery',label:'Grocery'},{id:'honey-do',label:'Honey-Do'},{id:'packing',label:'Baby Packing'}];
+  const tabDefs = [{id:'grocery',label:'🛒 Grocery'},{id:'honey-do',label:'🔨 Honey-Do'},{id:'packing',label:'👶 Baby Packing'}];
   async function load(t) {
     listTab = t||listTab;
     try {
@@ -311,125 +726,13 @@ async function renderLists() {
   load(listTab);
 }
 
-// ── COMMS INBOX ──
+// ── COMMS ──
 async function renderComms() {
   const m = document.getElementById('main');
-  m.innerHTML = loading('Loading comms...');
-  let activeChannel = 'all';
-  let activeFilter = 'pending';
-  let activeBatch = 'all';
-
-  async function load() {
-    try {
-      const [channelsRes, inboxRes] = await Promise.all([
-        GET('/api/channels'),
-        GET(`/api/comms/inbox${activeFilter !== 'all' ? '?status=' + activeFilter : ''}${activeBatch !== 'all' ? (activeFilter !== 'all' ? '&' : '?') + 'batch_window=' + activeBatch : ''}`),
-      ]);
-      const channels = channelsRes.channels || [];
-      let items = inboxRes.items || [];
-      if (activeChannel !== 'all') items = items.filter(i => i.channel_id === activeChannel);
-
-      // Group by batch window
-      const groups = { morning: [], midday: [], evening: [], other: [] };
-      for (const item of items) {
-        const bw = item.batch_window || 'other';
-        (groups[bw] || groups.other).push(item);
-      }
-
-      const healthDot = (ch) => {
-        const s = ch.health_status || 'unknown';
-        const color = s === 'healthy' ? 'var(--grn)' : s === 'degraded' ? 'var(--warn)' : s === 'down' ? 'var(--err)' : 'var(--tx4)';
-        return `<div style="width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0"></div>`;
-      };
-
-      m.innerHTML = `<div class="fi" style="display:flex;gap:24px">
-        <!-- Channel Sidebar -->
-        <div style="width:200px;min-width:200px;flex-shrink:0">
-          <div class="section-label">Channels</div>
-          <button class="nav-btn ${activeChannel==='all'?'active':''}" onclick="window._commsChannel('all')" style="margin-bottom:4px">
-            <span class="nav-icon">📥 All Channels</span>
-          </button>
-          ${channels.map(ch => `<button class="nav-btn ${activeChannel===ch.id?'active':''}" onclick="window._commsChannel('${esc(ch.id)}')" style="margin-bottom:2px">
-            <span class="nav-icon">${healthDot(ch)} ${esc(ch.icon||'📡')} ${esc(ch.display_name)}</span>
-            ${ch.enabled ? '' : '<span class="badge badge-warn" style="font-size:9px">off</span>'}
-          </button>`).join('')}
-        </div>
-        <!-- Main Content -->
-        <div style="flex:1;min-width:0">
-          <h1 class="page-title">Comms Inbox</h1>
-          <!-- Filter Bar -->
-          <div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap">
-            <div class="pill-tabs" style="margin-bottom:0">
-              ${['all','pending','draft','snoozed','done'].map(f => `<button class="pill ${f===activeFilter?'active':''}" onclick="window._commsFilter('${f}')">${f}</button>`).join('')}
-            </div>
-            <div class="pill-tabs" style="margin-bottom:0;margin-left:auto">
-              ${['all','morning','midday','evening'].map(b => `<button class="pill ${b===activeBatch?'active':''}" onclick="window._commsBatch('${b}')">${b}</button>`).join('')}
-            </div>
-          </div>
-          <!-- Grouped Items -->
-          ${['morning','midday','evening','other'].map(bw => {
-            const g = groups[bw];
-            if (!g || !g.length) return '';
-            return `<div style="margin-bottom:24px">
-              <div class="section-label">${bw === 'other' ? 'Unscheduled' : bw.charAt(0).toUpperCase() + bw.slice(1)} Batch</div>
-              <div style="display:grid;gap:8px">
-                ${g.map(item => `<div class="card" style="padding:14px 18px">
-                  <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
-                    <div style="flex:1;min-width:0">
-                      <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
-                        <span style="font-size:14px">${esc(item.channel_icon||'📡')}</span>
-                        <span style="font-size:13px;color:var(--tx3)">${esc(item.channel_name||item.channel_id||'')}</span>
-                        <span class="badge ${item.status==='pending'?'badge-warn':item.status==='draft'?'badge-lav':item.status==='done'?'badge-grn':'badge-info'}">${esc(item.status||'')}</span>
-                        ${item.urgency==='high'?'<span class="badge badge-err">urgent</span>':''}
-                      </div>
-                      <div style="font-weight:500;font-size:15px;margin-bottom:4px">${esc(item.subject||item.title||item.summary||'(no subject)')}</div>
-                      <div style="font-size:13px;color:var(--tx2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(item.content||item.body||'')}</div>
-                      <div style="font-size:11px;color:var(--tx4);margin-top:6px">${esc(item.created_at||'')}</div>
-                    </div>
-                    <div style="display:flex;gap:6px;flex-shrink:0">
-                      ${item.status==='draft'?`
-                        <button class="btn-g btn-sm" onclick="window._commsAction('approve','${esc(item.id)}')">Approve</button>
-                        <button class="btn-d btn-sm" onclick="window._commsAction('reject','${esc(item.id)}')">Reject</button>
-                      `:`
-                        <button class="btn-p btn-sm" onclick="window._commsAction('respond','${esc(item.id)}')">Respond</button>
-                        <button class="btn-s btn-sm" onclick="window._commsAction('snooze','${esc(item.id)}')">Snooze</button>
-                        <button class="btn-s btn-sm" onclick="window._commsAction('archive','${esc(item.id)}')">Archive</button>
-                      `}
-                    </div>
-                  </div>
-                </div>`).join('')}
-              </div>
-            </div>`;
-          }).join('')}
-          ${items.length === 0 ? '<div class="card-flat" style="text-align:center;padding:48px;color:var(--tx3)">No messages match your filters.</div>' : ''}
-        </div>
-      </div>`;
-    } catch(e) {
-      m.innerHTML = `<div class="fi"><h1 class="page-title">Comms Inbox</h1><div class="card-flat" style="text-align:center;padding:48px;color:var(--tx3)">Could not load comms. ${esc(e.message)}</div></div>`;
-    }
-  }
-
-  window._commsChannel = (ch) => { activeChannel = ch; load(); };
-  window._commsFilter = (f) => { activeFilter = f; load(); };
-  window._commsBatch = (b) => { activeBatch = b; load(); };
-  window._commsAction = async (action, id) => {
-    try {
-      if (action === 'approve') await POST(`/api/comms/${id}/approve-draft`, {});
-      else if (action === 'respond') await POST(`/api/comms/${id}/respond`, {});
-      else if (action === 'snooze') {
-        const until = prompt('Snooze until (YYYY-MM-DD):');
-        if (!until) return;
-        await POST(`/api/comms/${id}/snooze`, { until });
-      }
-      else if (action === 'archive') await POST(`/api/comms/${id}/respond`, {});
-      else if (action === 'reject') await POST(`/api/comms/${id}/respond`, {});
-      load();
-    } catch(e) { console.error(e); }
-  };
-  load();
+  m.innerHTML = `<div class="fi"><h1 class="page-title">Comms Inbox</h1><div class="card-flat" style="text-align:center;padding:48px;color:var(--tx3)">Comms feature coming soon. See API contract for endpoint shapes.</div></div>`;
 }
 
-// ── CHAT ──
+// ── CHAT (with SSE streaming) ──
 function renderChat() {
   const m = document.getElementById('main');
   const chips = ['today','now','grocery list','schedule','status','diff','help'];
@@ -455,6 +758,7 @@ function renderChat() {
     const el = document.getElementById('chat-msgs');
     if(el) el.scrollTop = el.scrollHeight;
   }
+  
   window._chatSend = async function(text) {
     const inp = document.getElementById('chat-input');
     const t = text || (inp?inp.value:'');
@@ -463,15 +767,60 @@ function renderChat() {
     chatMessages.push({role:'user',content:t,ts});
     if(inp) inp.value='';
     chatStreaming = true;
+    
+    // Add placeholder assistant message
+    chatMessages.push({role:'assistant',content:'',ts:new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'})});
     draw();
+    
     try {
-      const res = await POST('/api/chat/send',{message:t,session_id:chatSessionId});
-      chatMessages.push({role:'assistant',content:res.reply||res.content||'(no response)',ts:new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'})});
+      // Try SSE streaming first
+      const streamUrl = `/api/chat/stream?session_id=${chatSessionId}&message=${encodeURIComponent(t)}`;
+      const eventSource = new EventSource(streamUrl);
+      let streamedContent = '';
+      
+      eventSource.onmessage = (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          if (data.done) {
+            eventSource.close();
+            chatStreaming = false;
+            chatMessages[chatMessages.length-1].content = streamedContent || data.content || '(no response)';
+            draw();
+          } else if (data.token) {
+            streamedContent += data.token;
+            chatMessages[chatMessages.length-1].content = streamedContent;
+            draw();
+          } else if (data.content) {
+            // Non-streaming fallback
+            eventSource.close();
+            chatStreaming = false;
+            chatMessages[chatMessages.length-1].content = data.content;
+            draw();
+          }
+        } catch(err) {
+          console.error('SSE parse error:', err);
+        }
+      };
+      
+      eventSource.onerror = async (err) => {
+        console.warn('SSE failed, falling back to POST');
+        eventSource.close();
+        // Fallback to POST
+        try {
+          const res = await POST('/api/chat/send',{message:t,session_id:chatSessionId});
+          chatMessages[chatMessages.length-1].content = res.reply||res.content||'(no response)';
+        } catch(e2) {
+          chatMessages[chatMessages.length-1].content = 'Connection lost. Try again.';
+        }
+        chatStreaming = false;
+        draw();
+      };
+      
     } catch(e) {
-      chatMessages.push({role:'assistant',content:'Connection lost. Try again.',ts});
+      chatMessages[chatMessages.length-1].content = 'Connection lost. Try again.';
+      chatStreaming = false;
+      draw();
     }
-    chatStreaming = false;
-    draw();
   };
   draw();
 }
@@ -484,6 +833,10 @@ async function renderScoreboard() {
     const cards = data.cards||[];
     const layers = data.layers||[];
     const rewardHistory = data.rewardHistory||[];
+    const domainWins = data.domainWins||[];
+    const captain = data.captain||{};
+    const chores = data.chores||[];
+    
     m.innerHTML = `<div class="fi">
       <h1 class="page-title">Scoreboard</h1>
       <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:24px">
@@ -491,34 +844,120 @@ async function renderScoreboard() {
           <div style="font-size:36px;margin-bottom:6px">${c.emoji||''}</div>
           <div style="font-size:20px;font-weight:700;font-family:var(--head)">${esc(c.name)}</div>
           <div style="display:flex;justify-content:center;align-items:center;gap:6px;margin:12px 0">
-            <span style="font-size:22px;font-weight:700;color:var(--pink)">${c.streak?.current??0}</span>
+            <span style="font-size:22px;font-weight:700;color:var(--pink)">🔥 ${c.streak?.current??0}</span>
             <span style="font-size:13px;color:var(--tx3)">day streak</span>
           </div>
-          <div style="font-size:32px;font-weight:700;color:var(--grn)">${c.done??0}</div>
-          <div style="font-size:13px;color:var(--tx3)">done today</div>
-          <div style="margin-top:10px;font-size:12px;color:var(--tx4)">Week: ${c.wk??0} pts &middot; Best: ${c.streak?.best??0} days</div>
+          <div style="font-size:32px;font-weight:700;color:var(--grn)">${c.star?'⭐':''} ${c.done??0}</div>
+          <div style="font-size:13px;color:var(--tx3)">${c.star?'stars':'done'} today</div>
+          <div style="margin-top:10px;font-size:12px;color:var(--tx4)">Week: ${c.wk??0} ${c.star?'⭐':'pts'} &middot; Best: ${c.streak?.best??0} days</div>
         </div>`).join('')}
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px">
         <div class="card-flat">
-          <div class="section-label">Neuroprosthetic Layers</div>
+          <div class="section-label">Neuroprosthetic Layers (ADHD)</div>
           <div style="text-align:center;margin-bottom:16px"><div style="font-size:36px;font-weight:700;color:var(--pink);font-family:var(--head)">${data.overallScore??0}</div><div style="font-size:12px;color:var(--tx3)">/ 100 overall</div></div>
           ${layers.map(l=>`<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
-            <span style="font-size:12px;color:var(--tx2);min-width:70px">${esc(l.name)}</span>
+            <span style="font-size:12px;color:var(--tx2);min-width:90px">${esc(l.name)}</span>
             <div style="flex:1;height:6px;background:var(--bg-input);border-radius:3px;overflow:hidden"><div style="height:100%;width:${l.score}%;background:${l.score>40?'var(--grn)':l.score>20?'var(--warn)':'var(--err)'};border-radius:3px"></div></div>
             <span style="font-size:11px;font-family:var(--mono);color:var(--tx3);min-width:24px">${l.score}</span>
           </div>`).join('')}
         </div>
         <div class="card-flat">
           <div class="section-label">Recent Rewards</div>
-          ${rewardHistory.map((r,i)=>`<div style="display:flex;align-items:center;gap:10px;padding:8px 0;${i?'border-top:1px solid var(--bd)':''}">
+          ${rewardHistory.slice(0,6).map((r,i)=>`<div style="display:flex;align-items:center;gap:10px;padding:8px 0;${i?'border-top:1px solid var(--bd)':''}">
             <div style="width:8px;height:8px;border-radius:50%;background:${r.tier==='jackpot'?'var(--pink)':r.tier==='delight'?'var(--lav)':r.tier==='warm'?'var(--teal)':'var(--tx3)'};flex-shrink:0"></div>
             <span style="font-size:13px;color:var(--tx2);flex:1">${esc(r.msg)}</span>
             <span style="font-size:11px;color:var(--tx4);font-family:var(--mono)">${esc(r.ts||'')}</span>
           </div>`).join('')}
         </div>
-      </div></div>`;
+      </div>
+      
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px">
+        <div class="card-flat">
+          <div class="section-label">Domain Wins</div>
+          ${domainWins.map((dw,i)=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;${i?'border-top:1px solid var(--bd)':''}">
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="font-weight:500">${esc(dw.d)}</span>
+              ${dw.warn?`<span style="font-size:11px;color:var(--warn)">${esc(dw.warn)}</span>`:''}
+            </div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="font-size:18px;font-weight:700;color:var(--pink)">${dw.n}</span>
+              <span style="font-size:14px;color:var(--tx3)">${esc(dw.trend||'')}</span>
+            </div>
+          </div>`).join('')}
+        </div>
+        <div class="card-flat">
+          <div class="section-label">🐕 Captain Status</div>
+          <div style="font-size:15px;line-height:2;color:var(--tx2)">
+            Walked: ${captain.walked?'✅':'⏳'}<br>
+            Fed: ${captain.fed?'✅':'⏳'}<br>
+            Next walk: ${esc(captain.nextWalk||'—')}
+          </div>
+        </div>
+      </div>
+      
+      ${chores.length>0 ? `<div class="card-flat">
+        <div class="section-label">Charlie's Chores</div>
+        <div style="display:grid;gap:8px">
+          ${chores.map(ch=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:${ch.done?'var(--grn-bg)':'var(--bg-input)'};border-radius:8px">
+            <span style="font-size:14px;${ch.done?'text-decoration:line-through;color:var(--tx3)':''}">${esc(ch.title)}</span>
+            <span style="font-size:16px">${ch.done?'✅':''} +${ch.stars||0} ⭐</span>
+          </div>`).join('')}
+        </div>
+      </div>` : ''}
+      
+      ${data.familyTotal ? `<div style="text-align:center;margin-top:24px;padding:24px;background:var(--pink-bg2);border-radius:var(--r);border:2px solid var(--pink)">
+        <div style="font-size:14px;color:var(--tx3);margin-bottom:8px">Family Total</div>
+        <div style="font-size:48px;font-weight:700;color:var(--pink);font-family:var(--head)">${data.familyTotal.points||0} pts</div>
+        ${data.familyTotal.record?'<div style="font-size:13px;color:var(--pink);margin-top:8px">🏆 New record!</div>':''}
+      </div>` : ''}
+    </div>`;
   } catch(e) { m.innerHTML = `<div class="fi"><h1 class="page-title">Scoreboard</h1><div class="card-flat" style="text-align:center;padding:48px;color:var(--tx3)">Could not load scoreboard.</div></div>`; }
+}
+
+// ── TV SCOREBOARD (full-screen dark) ──
+async function renderTVScoreboard() {
+  document.body.innerHTML = loading('Loading TV scoreboard...');
+  
+  async function refresh() {
+    try {
+      const data = await GET('/api/scoreboard');
+      const cards = data.cards || [];
+      const layers = data.layers || [];
+      
+      document.body.innerHTML = `<div class="tv-scoreboard">
+        <div style="text-align:center;margin-bottom:60px">
+          <div class="huge" style="color:#E8A0BF">⭐ Scoreboard ⭐</div>
+        </div>
+        
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:32px;margin-bottom:60px">
+          ${cards.map(c=>`<div style="background:rgba(232,160,191,0.1);border:2px solid #E8A0BF;border-radius:24px;padding:40px;text-align:center">
+            <div style="font-size:64px;margin-bottom:16px">${c.emoji||''}</div>
+            <div class="big">${esc(c.name)}</div>
+            <div class="huge" style="color:#7CB98F;margin:20px 0">${c.star?'⭐':''} ${c.done??0}</div>
+            <div class="med" style="color:rgba(245,240,234,0.7)">🔥 ${c.streak?.current??0} day streak</div>
+          </div>`).join('')}
+        </div>
+        
+        <div style="background:rgba(232,160,191,0.05);border:2px solid rgba(232,160,191,0.3);border-radius:24px;padding:40px">
+          <div class="big" style="margin-bottom:30px;text-align:center">ADHD Neuroprosthetic Layers</div>
+          ${layers.map(l=>`<div style="display:flex;align-items:center;gap:20px;margin-bottom:20px">
+            <span class="med" style="min-width:200px">${esc(l.name)}</span>
+            <div style="flex:1;height:20px;background:rgba(232,160,191,0.1);border-radius:10px;overflow:hidden">
+              <div style="height:100%;width:${l.score}%;background:${l.score>40?'#7CB98F':l.score>20?'#E8C07D':'#D4756B'};border-radius:10px"></div>
+            </div>
+            <span class="med" style="min-width:60px;font-family:var(--mono)">${l.score}</span>
+          </div>`).join('')}
+        </div>
+      </div>`;
+    } catch(e) {
+      document.body.innerHTML = `<div class="tv-scoreboard"><div class="huge" style="text-align:center;margin-top:120px">Could not load scoreboard</div></div>`;
+    }
+  }
+  
+  refresh();
+  setInterval(refresh, 60000); // Refresh every 60s
 }
 
 // ── PEOPLE ──
@@ -543,21 +982,50 @@ async function renderPeople() {
           <div class="card-flat"><div class="section-label">Contacts &amp; Vendors</div>
             ${contacts.map((p,i)=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;${i?'border-top:1px solid var(--bd)':''}">
               <div><div style="font-weight:500">${esc(p.name)}</div><div style="font-size:12px;color:var(--tx3)">${esc(p.phone||'')} &middot; ${esc(p.type||'')}</div></div>
-              <span style="font-size:12px;color:${(p.days||0)>14?'var(--warn)':'var(--tx3)'}">${p.days||0}d ago</span>
+              <span style="font-size:12px;color:${(p.days||0)>14?'var(--warn)':'var(--tx3)'}">${p.days||0}d ago${p.ghost?' 👻':''}</span>
             </div>`).join('')}
           </div></div>`;
-      } else {
+      } else if (tab==='comms') {
+        const data = await GET('/api/people/comms?limit=20');
+        const comms = data.comms || [];
         m.innerHTML = `<div class="fi"><h1 class="page-title">People</h1>
           <div class="pill-tabs">${['contacts','comms','observations','autonomy'].map(t2=>`<button class="pill ${t2===tab?'active':''}" onclick="window._peopleTab('${t2}')">${t2}</button>`).join('')}</div>
-          <div class="card-flat" style="text-align:center;padding:48px;color:var(--tx3)">${tab} view loading from API...</div></div>`;
-        // Try to load from appropriate API
-        let data;
-        if (tab==='comms') data = await GET('/api/people/comms?limit=20');
-        else if (tab==='observations') data = await GET('/api/people/observations');
-        else data = await GET('/api/people/autonomy-tiers');
-        // Re-render with data
-        const items = data.comms||data.observations||data.tiers||[];
-        m.querySelector('.card-flat:last-child').innerHTML = `<div class="section-label">${tab}</div>${items.map((it,i)=>`<div style="padding:10px 0;${i?'border-top:1px solid var(--bd)':''}"><div style="font-weight:500">${esc(it.person||it.action||it.name||'')}</div><div style="font-size:13px;color:var(--tx2)">${esc(it.msg||it.note||it.desc||'')}</div></div>`).join('')||'<div style="color:var(--tx3);text-align:center;padding:20px">No data</div>'}`;
+          <div class="card-flat"><div class="section-label">Recent Communications</div>
+            ${comms.map((c,i)=>`<div style="padding:12px 0;${i?'border-top:1px solid var(--bd)':''}">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px">
+                <div style="font-weight:500">${esc(c.person||'')}</div>
+                <span style="font-size:11px;color:var(--tx4);font-family:var(--mono)">${esc(c.ts||'')}</span>
+              </div>
+              <div style="font-size:13px;color:var(--tx2)">${esc(c.ch||'')} · ${esc(c.dir||'')} · ${esc(c.msg||'')}</div>
+            </div>`).join('')}
+          </div></div>`;
+      } else if (tab==='observations') {
+        const data = await GET('/api/people/observations');
+        const obs = data.observations || [];
+        m.innerHTML = `<div class="fi"><h1 class="page-title">People</h1>
+          <div class="pill-tabs">${['contacts','comms','observations','autonomy'].map(t2=>`<button class="pill ${t2===tab?'active':''}" onclick="window._peopleTab('${t2}')">${t2}</button>`).join('')}</div>
+          <div class="card-flat"><div class="section-label">Observations</div>
+            ${obs.map((o,i)=>`<div style="padding:12px 0;${i?'border-top:1px solid var(--bd)':''}">
+              <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+                <div style="font-weight:500">${esc(o.person||'')}</div>
+                <span style="font-size:11px;color:var(--tx4);font-family:var(--mono)">${esc(o.ts||'')}</span>
+              </div>
+              <div style="font-size:13px;color:var(--tx2)">${esc(o.note||'')}</div>
+            </div>`).join('')}
+          </div></div>`;
+      } else if (tab==='autonomy') {
+        const data = await GET('/api/people/autonomy-tiers');
+        const tiers = data.tiers || [];
+        m.innerHTML = `<div class="fi"><h1 class="page-title">People</h1>
+          <div class="pill-tabs">${['contacts','comms','observations','autonomy'].map(t2=>`<button class="pill ${t2===tab?'active':''}" onclick="window._peopleTab('${t2}')">${t2}</button>`).join('')}</div>
+          <div class="card-flat" style="padding:0;overflow:hidden"><div style="padding:20px"><div class="section-label">Autonomy Tiers</div></div>
+            <table><thead><tr>${['Action','Level','Description'].map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>
+            ${tiers.map(t=>`<tr>
+              <td style="font-weight:500">${esc(t.action||'')}</td>
+              <td><span class="badge ${t.level==='Autonomous'?'badge-grn':t.level==='Confirm'?'badge-warn':'badge-err'}">${esc(t.level||'')}</span></td>
+              <td style="font-size:13px;color:var(--tx2)">${esc(t.desc||'')}</td>
+            </tr>`).join('')}</tbody></table>
+          </div></div>`;
       }
     } catch(e) { m.innerHTML = `<div class="fi"><h1 class="page-title">People</h1><div class="card-flat" style="text-align:center;padding:48px;color:var(--tx3)">Could not load people data.</div></div>`; }
   }
@@ -649,74 +1117,49 @@ async function renderSettings() {
         const d = await GET('/api/settings/household');
         const members = d.members||[];
         sc.innerHTML = `<div class="card-flat"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h3 style="font-size:16px;font-weight:600;font-family:var(--head)">Household Members</h3><button class="btn-p btn-sm">+ Add Member</button></div>
-          <table><thead><tr>${['Member','Role','View Mode','Velocity Cap','Channels'].map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>
+          <table><thead><tr>${['Member','Role','View Mode','Velocity Cap','Active'].map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>
           ${members.map(mb=>`<tr>
-            <td><div style="display:flex;align-items:center;gap:10px"><span style="font-size:20px">${esc(mb.emoji||'')}</span><div><div style="font-weight:500">${esc(mb.name)}</div><div style="font-size:11px;color:var(--tx4);font-family:var(--mono)">${esc(mb.id)}</div></div></div></td>
+            <td><div style="font-weight:500">${esc(mb.display_name||mb.name)}</div><div style="font-size:11px;color:var(--tx4);font-family:var(--mono)">${esc(mb.id)}</div></td>
             <td><span class="badge ${mb.role==='parent'?'badge-pink':'badge-lav'}">${esc(mb.role)}</span></td>
             <td style="font-size:13px;color:var(--tx2)">${esc(mb.view_mode||'')}</td>
             <td style="font-family:var(--mono);font-size:13px">${mb.velocity_cap??'\u2014'}</td>
-            <td style="font-size:12px;color:var(--tx2)">${(mb.channels||[]).map(ch=>`<span class="badge badge-info" style="margin:2px">${esc(ch)}</span>`).join('')||'\u2014'}</td>
+            <td><span class="badge ${mb.active?'badge-grn':'badge-warn'}">${mb.active?'Yes':'No'}</span></td>
           </tr>`).join('')}</tbody></table></div>`;
-      } else if (settingsTab==='channels') {
-        const d = await GET('/api/channels');
-        const channels = d.channels||[];
-        sc.innerHTML = `<div class="card-flat"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h3 style="font-size:16px;font-weight:600;font-family:var(--head)">Channel Management</h3></div>
-          <table><thead><tr>${['Channel','Category','Status','Health','Last Check','Failures','Setup',''].map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>
-          ${channels.map(ch=>{
-            const hColor = ch.health_status==='healthy'?'var(--grn)':ch.health_status==='degraded'?'var(--warn)':'var(--err)';
-            return `<tr>
-              <td><div style="display:flex;align-items:center;gap:8px"><span style="font-size:18px">${esc(ch.icon||'📡')}</span><div><div style="font-weight:500">${esc(ch.display_name)}</div><div style="font-size:11px;color:var(--tx4);font-family:var(--mono)">${esc(ch.id)}</div></div></div></td>
-              <td><span class="badge badge-info">${esc(ch.category||'')}</span></td>
-              <td><div onclick="window._channelToggle('${esc(ch.id)}',${!ch.enabled})" style="width:42px;height:24px;border-radius:12px;cursor:pointer;position:relative;${ch.enabled?'background:var(--pink)':'background:var(--bd)'}"><div style="width:18px;height:18px;border-radius:50%;background:#fff;position:absolute;top:3px;left:${ch.enabled?'21px':'3px'};transition:left .2s;box-shadow:0 1px 3px rgba(0,0,0,0.15)"></div></div></td>
-              <td><div style="display:flex;align-items:center;gap:6px"><div style="width:8px;height:8px;border-radius:50%;background:${hColor}"></div><span style="font-size:13px">${esc(ch.health_status||'unknown')}</span></div></td>
-              <td style="font-size:12px;color:var(--tx3);font-family:var(--mono)">${esc(ch.last_check||'never')}</td>
-              <td style="font-family:var(--mono);text-align:center;color:${(ch.consecutive_failures||0)>0?'var(--err)':'var(--tx3)'}">${ch.consecutive_failures||0}</td>
-              <td><span class="badge ${ch.setup_complete?'badge-grn':'badge-warn'}">${ch.setup_complete?'Complete':'Incomplete'}</span></td>
-              <td>${!ch.setup_complete?`<button class="btn-p btn-sm" onclick="window._channelOnboard('${esc(ch.id)}')">Setup</button>`:''}</td>
-            </tr>`;
-          }).join('')}</tbody></table></div>`;
-        window._channelToggle = async(id, enable)=>{ try{ await POST(`/api/channels/${id}/${enable?'enable':'disable'}`,{}); load(settingsTab); }catch(e){console.error(e);} };
-        window._channelOnboard = (id)=>{ alert('Channel onboarding wizard for '+id+' — coming soon'); };
       } else if (settingsTab==='permissions') {
         const d = await GET('/api/settings/permissions');
         const agents = d.agents||[];
-        const layers = d.enforcement_layers||['User Consent','Privacy Fence','Governance Gates','Budget Ceiling','Undo Journal','Audit Log'];
-        sc.innerHTML = `<div>
-          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;margin-bottom:24px">
-            ${agents.map(a=>`<div class="card">
-              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><span style="font-size:16px;font-weight:600;font-family:var(--head)">${esc(a.name)}</span><span class="badge badge-info">${esc(a.capabilities||'')}</span></div>
-              <div style="font-size:12px;color:var(--tx3);margin-bottom:8px">Allowed commands:</div>
-              <div style="display:flex;flex-wrap:wrap;gap:4px">${(a.commands||[]).map(c=>`<span class="badge badge-lav">${esc(c)}</span>`).join('')||'<span style="color:var(--tx4)">None</span>'}</div>
-              <div style="margin-top:10px;font-size:12px;color:var(--tx3)">Channels: ${(a.channels||[]).join(', ')||'all'}</div>
-            </div>`).join('')}
-          </div>
-          <div class="card-flat"><div class="section-label">6-Layer Enforcement</div>
-            <div style="display:flex;gap:8px;flex-wrap:wrap">${layers.map((l,i)=>`<div style="display:flex;align-items:center;gap:8px;padding:10px 16px;border-radius:10px;background:var(--bg-input);border:1px solid var(--bd)"><div style="width:24px;height:24px;border-radius:50%;background:var(--pink);color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700">${i+1}</div><span style="font-size:13px;font-weight:500">${esc(l)}</span></div>`).join('')}</div>
-          </div></div>`;
+        sc.innerHTML = `<div class="card-flat"><h3 style="font-size:16px;font-weight:600;font-family:var(--head);margin-bottom:16px">Agent Capabilities</h3>
+          ${agents.map(a=>`<div style="padding:16px;border-radius:10px;background:var(--bg-input);margin-bottom:12px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+              <span style="font-size:15px;font-weight:600">${esc(a.display_name||a.name)}</span>
+              <span class="badge ${a.capabilities==='none'?'badge-err':a.capabilities==='read-only'?'badge-warn':'badge-grn'}">${esc(a.capabilities||'')}</span>
+            </div>
+            <div style="font-size:12px;color:var(--tx3);margin-bottom:6px">Channels: ${(a.channels||[]).join(', ')||'all'}</div>
+            <div style="font-size:12px;color:var(--tx3)">Commands: ${(a.allowed_commands||[]).slice(0,5).join(', ')||'None'}${(a.allowed_commands||[]).length>5?', ...':''}</div>
+          </div>`).join('')}</div>`;
       } else if (settingsTab==='coaching') {
         const d = await GET('/api/settings/coaching');
         const protocols = d.protocols||[];
         sc.innerHTML = `<div class="card-flat"><h3 style="font-size:16px;font-weight:600;font-family:var(--head);margin-bottom:16px">Coaching Protocols</h3>
           ${protocols.map((p,i)=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:14px 0;${i?'border-top:1px solid var(--bd)':''}">
-            <div style="flex:1"><div style="font-size:15px;font-weight:500">${esc(p.name)}</div><div style="font-size:13px;color:var(--tx3);margin-top:2px">Trigger: ${esc(p.trigger||'')}</div></div>
+            <div style="flex:1"><div style="font-size:15px;font-weight:500">${esc(p.name)}</div><div style="font-size:13px;color:var(--tx3);margin-top:2px">Trigger: ${esc(p.trigger_condition||'')}</div></div>
             <div onclick="window._coachToggle('${esc(p.id||p.name)}',${!p.active})" style="width:42px;height:24px;border-radius:12px;cursor:pointer;position:relative;${p.active?'background:var(--pink)':'background:var(--bd)'}"><div style="width:18px;height:18px;border-radius:50%;background:#fff;position:absolute;top:3px;left:${p.active?'21px':'3px'};transition:left .2s;box-shadow:0 1px 3px rgba(0,0,0,0.15)"></div></div>
           </div>`).join('')}</div>`;
-        window._coachToggle = async(id,active)=>{ try{ await POST('/api/settings/coaching',{id,active}); load(settingsTab); }catch(e){console.error(e);} };
+        window._coachToggle = async(id,active)=>{ try{ await POST(`/api/settings/coaching/${id}/toggle`,{active}); load(settingsTab); }catch(e){console.error(e);} };
       } else if (settingsTab==='gates') {
         const d = await GET('/api/settings/gates');
-        const gates = d.gates||[];
+        const actionGates = d.action_gates || {};
         sc.innerHTML = `<div class="card-flat" style="padding:0;overflow:hidden"><div style="padding:20px"><h3 style="font-size:16px;font-weight:600;font-family:var(--head)">Governance Gates</h3></div>
-          <table><thead><tr>${['Action','Default Gate','Agent Overrides'].map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>
-          ${gates.map(g=>`<tr>
-            <td style="font-weight:500">${esc(g.action)}</td>
-            <td><span class="badge ${g.gate==='autonomous'?'badge-grn':g.gate==='confirm'?'badge-warn':g.gate==='approve'?'badge-pink':'badge-err'}">${esc(g.gate||g.default_gate||'')}</span></td>
-            <td style="font-size:12px;color:var(--tx2)">${(g.overrides||[]).map(o=>`<span class="badge badge-lav" style="margin:2px">${esc(o.agent)}: ${esc(o.gate)}</span>`).join('')||'\u2014'}</td>
+          <table><thead><tr>${['Action','Gate'].map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>
+          ${Object.entries(actionGates).map(([action,gate])=>`<tr>
+            <td style="font-weight:500">${esc(action.replace(/_/g,' '))}</td>
+            <td><span class="badge ${gate===true||gate==='autonomous'?'badge-grn':gate==='confirm'?'badge-warn':gate===false||gate==='off'?'badge-err':'badge-pink'}">${typeof gate==='boolean'?(gate?'on':'off'):esc(gate)}</span></td>
           </tr>`).join('')}</tbody></table></div>`;
       } else if (settingsTab==='memory') {
         let q = '';
         async function loadMemory(query) {
           q = query||'';
-          const d = await GET(`/api/settings/memory?q=${encodeURIComponent(q)}&member=${currentActor}`);
+          const d = await GET(`/api/settings/memory?member=${currentActor}${q?'&q='+encodeURIComponent(q):''}`);
           const memories = d.memories||[];
           document.getElementById('memory-results').innerHTML = memories.length ? memories.map(mem=>`<div class="card" style="margin-bottom:12px">
             <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
@@ -724,7 +1167,7 @@ async function renderSettings() {
               <span style="font-size:11px;color:var(--tx4);font-family:var(--mono)">x${mem.reinforcement_count||1}</span>
             </div>
             <p style="font-size:14px;color:var(--tx);line-height:1.6">${esc(mem.content)}</p>
-            <div style="font-size:11px;color:var(--tx4);margin-top:8px">${esc(mem.created_at||'')} &middot; ${esc(mem.member||currentActor)}</div>
+            <div style="font-size:11px;color:var(--tx4);margin-top:8px">${esc(mem.created_at||'')} &middot; ${esc(mem.domain||'')||'general'}</div>
           </div>`).join('') : '<div style="text-align:center;padding:40px;color:var(--tx3)">No memories found.</div>';
         }
         sc.innerHTML = `<div>
@@ -732,27 +1175,15 @@ async function renderSettings() {
           <div id="memory-results">${loading()}</div></div>`;
         window._memSearch = ()=>{ const v=document.getElementById('memory-search')?.value||''; loadMemory(v); };
         loadMemory('');
-        return; // early return since we handle our own async
+        return;
       }
     } catch(e) {
-      sc.innerHTML = `<div class="card-flat" style="text-align:center;padding:48px;color:var(--tx3)">Could not load ${SETTINGS_LABELS[settingsTab]} data.</div>`;
+      sc.innerHTML = `<div class="card-flat" style="text-align:center;padding:48px;color:var(--tx3)">Could not load ${SETTINGS_LABELS[settingsTab]} data. ${esc(e.message)}</div>`;
     }
   }
   window._settingsTab = load;
   load(settingsTab);
 }
-
-// ── Boot ──
-renderSidebar();
-renderPage();
-// Health polling
-setInterval(async()=>{
-  try {
-    const h = await GET('/api/health');
-    const pill = document.getElementById('health-pill');
-    if(pill) { const ok=h.status==='healthy'; pill.style.background=ok?'var(--grn-bg)':'var(--err-bg)'; pill.innerHTML=`<div style="width:7px;height:7px;border-radius:50%;background:${ok?'var(--grn)':'var(--err)'};animation:pulse 2s infinite"></div><span style="font-size:12px;color:${ok?'var(--grn)':'var(--err)'};font-weight:500">${ok?'System Healthy':'System Unhealthy'}</span>`; }
-  } catch{}
-}, 300000);
 </script>
 </body>
 </html>

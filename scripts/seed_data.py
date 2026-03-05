@@ -12,9 +12,10 @@ import aiosqlite
 from pib.db import apply_migrations, apply_schema, get_connection
 
 
+# Set after boot: UPDATE common_members SET tailscale_email = 'your@email.com' WHERE id = 'm-james';
 MEMBERS = [
     {
-        "id": "m-james", "display_name": "James", "role": "parent",
+        "id": "m-james", "display_name": "James", "role": "parent", "tailscale_email": "",
         "can_be_assigned_tasks": 1, "can_receive_messages": 1,
         "preferred_channel": "imessage", "view_mode": "carousel",
         "digest_mode": "full", "velocity_cap": 15,
@@ -28,7 +29,7 @@ MEMBERS = [
         }),
     },
     {
-        "id": "m-laura", "display_name": "Laura", "role": "parent",
+        "id": "m-laura", "display_name": "Laura", "role": "parent", "tailscale_email": "",
         "can_be_assigned_tasks": 1, "can_receive_messages": 1,
         "preferred_channel": "imessage", "view_mode": "compressed",
         "digest_mode": "compressed", "velocity_cap": 20,
@@ -36,12 +37,12 @@ MEMBERS = [
         "imessage_handle": "laura@example.com",
     },
     {
-        "id": "m-charlie", "display_name": "Charlie", "role": "child",
+        "id": "m-charlie", "display_name": "Charlie", "role": "child", "tailscale_email": "",
         "is_adult": 0, "age": 6, "view_mode": "child",
         "capabilities": json.dumps({"can_stay_home_alone": False, "needs_car_seat": False}),
     },
     {
-        "id": "m-baby", "display_name": "Baby Girl", "role": "child",
+        "id": "m-baby", "display_name": "Baby Girl", "role": "child", "tailscale_email": "",
         "is_adult": 0, "expected_arrival": "2026-05-15",
         "capabilities": json.dumps({"needs_constant_supervision": True}),
     },

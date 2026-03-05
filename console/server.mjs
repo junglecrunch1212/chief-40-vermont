@@ -274,31 +274,122 @@ const channelRouter = createChannelRouter(getDB, auditLog, guardedWrite);
 app.use("/api/comms", requireMember, commsRouter);
 app.use("/api/channels", requireMember, channelRouter);
 
-// ─── Member Identity Middleware ───
+// ═══════════════════════════════════════════════════════════
+// IDENTITY — Tailscale Serve headers → member resolution
+// ═══════════════════════════════════════════════════════════
+//
+// Tailscale Serve proxies to localhost:3333 and injects:
+//   Tailscale-User-Login: james@gmail.com
+//   Tailscale-User-Name: James Stice
+//
+// Cryptographically guaranteed by the WireGuard tunnel.
+// Tailscale strips spoofed versions before injecting the real ones.
+// Fallback: X-PIB-Member header (only when PIB_ENV=dev).
+
+function resolveIdentity(req) {
+  const db = getDB();
+
+  // Primary: Tailscale identity header
+  const tsLogin = req.headers["tailscale-user-login"];
+  if (tsLogin) {
+    const member = db.prepare(
+      "SELECT * FROM common_members WHERE tailscale_email = ? AND active = 1"
+    ).get(tsLogin.toLowerCase());
+    if (member) {
+      // View-as override (parent viewing as child for scoreboard)
+      const viewAs = req.query.view_as || req.headers["x-pib-view-as"];
+      if (viewAs && member.role === 'parent') {
+        const target = db.prepare(
+          "SELECT * FROM common_members WHERE id = ? AND active = 1"
+        ).get(viewAs);
+        if (target) {
+          return {
+            authMember: member,       // WHO is authenticated
+            viewMember: target,       // WHO they're viewing as
+            memberId: target.id,      // Effective member ID for data queries
+            authMemberId: member.id,  // Real identity for write permissions
+            role: member.role,        // Always the real user's role
+            source: 'tailscale',
+          };
+        }
+      }
+      return {
+        authMember: member, viewMember: member,
+        memberId: member.id, authMemberId: member.id,
+        role: member.role, source: 'tailscale',
+      };
+    }
+    // Known Tailscale user but unmapped — tagged device (kitchen TV, etc.)
+    return {
+      authMember: null, viewMember: null,
+      memberId: null, authMemberId: null,
+      role: 'device', tsLogin, source: 'tailscale-unmapped',
+    };
+  }
+
+  // Fallback: X-PIB-Member (dev only)
+  const devMode = process.env.PIB_ENV === 'dev';
+  const headerMemberId = req.headers["x-pib-member"] || req.query.member;
+  if (headerMemberId && devMode) {
+    const member = db.prepare(
+      "SELECT * FROM common_members WHERE id = ? AND active = 1"
+    ).get(headerMemberId);
+    if (member) {
+      return {
+        authMember: member, viewMember: member,
+        memberId: member.id, authMemberId: member.id,
+        role: member.role, source: 'dev-header',
+      };
+    }
+  }
+
+  return null;
+}
 
 function requireMember(req, res, next) {
-  const memberId = req.headers["x-pib-member"] || req.query.member;
-  if (!memberId) {
-    return res.status(400).json({ error: "X-PIB-Member header or ?member= query param required" });
-  }
-  const d = getDB();
-  const member = d.prepare("SELECT * FROM common_members WHERE id = ? AND active = 1").get(memberId);
-  if (!member) {
-    return res.status(404).json({ error: `Member ${memberId} not found` });
-  }
-  req.member = member;
-  req.memberId = memberId;
+  const identity = resolveIdentity(req);
+  if (!identity) return res.status(401).json({ error: "Not authenticated. Connect via Tailscale." });
+  if (!identity.memberId) return res.status(403).json({ error: "Tailscale user not mapped to a household member", tsLogin: identity.tsLogin });
+  req.identity = identity;
+  req.member = identity.viewMember;
+  req.memberId = identity.memberId;
+  req.authMemberId = identity.authMemberId;
+  req.memberRole = identity.role;
+  next();
+}
+
+function requireParent(req, res, next) {
+  const identity = resolveIdentity(req);
+  if (!identity) return res.status(401).json({ error: "Not authenticated. Connect via Tailscale." });
+  if (!identity.memberId) return res.status(403).json({ error: "Tailscale user not mapped to a household member" });
+  if (identity.role !== 'parent') return res.status(403).json({ error: "Parent access required" });
+  req.identity = identity;
+  req.member = identity.authMember;
+  req.memberId = identity.authMemberId;
+  req.authMemberId = identity.authMemberId;
+  req.memberRole = identity.role;
   next();
 }
 
 function optionalMember(req, _res, next) {
-  const memberId = req.headers["x-pib-member"] || req.query.member;
-  if (memberId) {
-    const d = getDB();
-    const member = d.prepare("SELECT * FROM common_members WHERE id = ? AND active = 1").get(memberId);
-    req.member = member || null;
-    req.memberId = memberId;
+  const identity = resolveIdentity(req);
+  if (identity && identity.memberId) {
+    req.identity = identity;
+    req.member = identity.viewMember;
+    req.memberId = identity.memberId;
+    req.authMemberId = identity.authMemberId;
+    req.memberRole = identity.role;
   }
+  next();
+}
+
+// For kitchen TV, scoreboard display — any Tailscale device, mapped or not
+function requireTailscale(req, res, next) {
+  const identity = resolveIdentity(req);
+  if (!identity) return res.status(401).json({ error: "Not authenticated. Connect via Tailscale." });
+  req.identity = identity;
+  req.memberId = identity.memberId;
+  req.memberRole = identity.role;
   next();
 }
 
@@ -310,6 +401,25 @@ function optionalMember(req, _res, next) {
 app.get("/api/health", (_req, res) => {
   const result = runCLI("health");
   res.json(result);
+});
+
+// --- Who Am I ---
+app.get("/api/whoami", (req, res) => {
+  const identity = resolveIdentity(req);
+  if (!identity) return res.status(401).json({ error: "Not authenticated" });
+  const db = getDB();
+  res.json({
+    memberId: identity.memberId,
+    authMemberId: identity.authMemberId,
+    displayName: identity.authMember?.display_name || identity.tsLogin || null,
+    role: identity.role,
+    source: identity.source,
+    viewMode: identity.viewMember?.view_mode || null,
+    canSwitchView: identity.role === 'parent',
+    availableViews: identity.role === 'parent'
+      ? db.prepare("SELECT id, display_name, role, view_mode FROM common_members WHERE active = 1").all()
+      : [{ id: identity.memberId, display_name: identity.viewMember?.display_name, role: identity.role }],
+  });
 });
 
 // --- Custody ---
@@ -1864,8 +1974,8 @@ app.get("/api/sensors", optionalMember, (req, res) => {
 // START
 // ═══════════════════════════════════════════════════════════
 
-app.listen(PORT, () => {
-  console.log(`PIB Console running on http://localhost:${PORT}`);
+app.listen(PORT, '127.0.0.1', () => {
+  console.log(`PIB Console on http://127.0.0.1:${PORT} (Tailscale Serve will proxy)`);
   console.log(`Database: ${DB_PATH}`);
 });
 

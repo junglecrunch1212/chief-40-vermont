@@ -156,7 +156,8 @@ let captureBadge = 0;
 // Boot is deferred to end of script (after all const declarations)
 // See bottom of file for: initApp() / renderTVScoreboard()
 
-function initApp() {
+async function initApp() {
+  await bootstrapIdentity();
   renderSidebar();
   renderPage();
   // Health polling
@@ -189,12 +190,31 @@ function initApp() {
 
 // ── API Layer ──
 async function api(path, opts = {}) {
-  const res = await fetch(path, {
-    headers: { 'Content-Type':'application/json', 'X-PIB-Member': currentActor, ...opts.headers },
+  const viewAs = currentActor;
+  const sep = path.includes('?') ? '&' : '?';
+  const url = viewAs ? `${path}${sep}view_as=${viewAs}` : path;
+  const res = await fetch(url, {
+    headers: { 'Content-Type': 'application/json', ...opts.headers },
     ...opts,
   });
+  if (res.status === 401) {
+    document.body.innerHTML = '<div style="padding:60px;text-align:center;font-family:var(--body)"><h1 style="font-size:24px;margin-bottom:16px">🔒 Not Connected</h1><p style="color:var(--tx2)">Open this page through your Tailscale network:<br><code style="font-size:14px">https://pib-mini.YOUR-TAILNET.ts.net</code></p></div>';
+    throw new Error('Not authenticated');
+  }
   if (!res.ok) throw new Error(`API ${res.status}`);
   return res.json();
+}
+
+let authenticatedMember = null;
+async function bootstrapIdentity() {
+  try {
+    const d = await api('/api/whoami');
+    authenticatedMember = d;
+    if (d.memberId && !localStorage.getItem('pib-actor-override')) {
+      currentActor = d.memberId;
+    }
+    if (d.role === 'child') currentActor = d.memberId;
+  } catch(e) { console.error('Identity bootstrap failed:', e); }
 }
 const GET = (p) => api(p);
 const POST = (p, body) => api(p, { method:'POST', body: JSON.stringify(body) });
@@ -290,18 +310,16 @@ function renderSidebar() {
   document.getElementById('sidebar').innerHTML = h;
 }
 
-function switchActor(id) { 
-  currentActor=id; 
-  localStorage.setItem('pib-actor',id); 
-  const actor = MEMBERS.find(m=>m.id===id);
+function switchActor(id) {
+  if (authenticatedMember && authenticatedMember.role !== 'parent') return;
+  currentActor = id;
+  localStorage.setItem('pib-actor-override', id);
+  const actor = MEMBERS.find(m => m.id === id);
   const shell = document.getElementById('shell');
-  if (actor?.viewMode === 'child') {
-    shell.classList.add('child-view');
-  } else {
-    shell.classList.remove('child-view');
-  }
-  renderSidebar(); 
-  renderPage(); 
+  if (actor?.viewMode === 'child') { shell.classList.add('child-view'); }
+  else { shell.classList.remove('child-view'); }
+  renderSidebar();
+  renderPage();
 }
 
 function navigate(page) { 

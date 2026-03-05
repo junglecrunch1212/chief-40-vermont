@@ -97,6 +97,33 @@ tbody tr:hover{background:var(--bg-hover)}
 .tv-scoreboard .med{font-size:32px}
 .child-view .sidebar{display:none!important}
 .child-view .main{padding:0!important}
+@media (max-width: 768px) {
+  .shell { flex-direction: column; }
+  .sidebar {
+    width: 100%; min-width: 100%; height: auto;
+    border-right: none; border-top: 1px solid var(--bd);
+    flex-direction: row; padding: 6px 4px; overflow-x: auto;
+    position: fixed; bottom: 0; left: 0; z-index: 100;
+    background: var(--bg-side); order: 2;
+  }
+  .sidebar > div { display: flex; flex-direction: row; gap: 2px; width: 100%; }
+  .sidebar .nav-btn {
+    flex-direction: column; padding: 6px 4px; font-size: 10px;
+    gap: 2px; min-width: 0; flex: 1; text-align: center; justify-content: center;
+  }
+  .sidebar .nav-btn .nav-icon { flex-direction: column; gap: 2px; }
+  .sidebar .nav-btn .nav-icon svg { width: 18px; height: 18px; }
+  .sidebar .section-label, .sidebar .actor-btn { display: none; }
+  .main { padding: 14px 14px 80px 14px; order: 1; }
+  .page-title { font-size: 22px; margin-bottom: 16px; }
+  .card { padding: 14px; }
+  table { font-size: 12px; }
+  td, th { padding: 8px; }
+  .pill-tabs { flex-wrap: nowrap; }
+  .pill { font-size: 11px; padding: 6px 12px; }
+  .tv-scoreboard { padding: 20px; }
+  .tv-scoreboard .huge { font-size: 48px; }
+}
 </style>
 </head>
 <body>
@@ -330,6 +357,25 @@ function navigate(page) {
   renderPage(); 
 }
 
+// ── Quick Capture Bar ──
+const captureBar = `
+  <div style="position:sticky;top:0;z-index:50;background:var(--bg);padding:12px 0 16px;margin-bottom:16px">
+    <div style="display:flex;gap:8px">
+      <input id="quick-capture" placeholder="Capture a thought... (try: grocery: milk, call: dentist, idea: blog post)"
+        style="flex:1;font-size:15px"
+        onkeydown="if(event.key==='Enter'&&this.value.trim()){window._quickCapture(this.value);this.value=''}">
+      <button class="btn-p" onclick="const i=document.getElementById('quick-capture');if(i.value.trim()){window._quickCapture(i.value);i.value=''}">Capture</button>
+    </div>
+  </div>`;
+
+window._quickCapture = async (text) => {
+  try {
+    await POST('/api/capture', { text, source: 'console' });
+    const inp = document.getElementById('quick-capture');
+    if (inp) { inp.placeholder = '✓ Captured!'; setTimeout(() => { inp.placeholder = 'Capture a thought...'; }, 1500); }
+  } catch(e) { alert('Capture failed: ' + e.message); }
+};
+
 // ── Page Router ──
 function renderPage() {
   const m = document.getElementById('main');
@@ -419,6 +465,8 @@ async function renderTodayJames() {
       
       <h1 style="font-size:28px;font-weight:600;font-family:var(--head);letter-spacing:-.5px;line-height:1.2">${greeting()}, James</h1>
       <p style="font-size:15px;color:var(--tx2);margin-top:6px">${data.summary||''}</p>
+      
+      ${captureBar}
       
       <div style="display:flex;justify-content:center;align-items:center;gap:8px;margin:16px 0 8px">
         <span style="font-size:12px;color:var(--tx3);font-family:var(--mono)">${activeIdx+1} / ${stream.length}</span>

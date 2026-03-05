@@ -696,16 +696,26 @@ function timeToMinutes(timeStr) {
 }
 
 // --- Lists ---
+app.get("/api/lists", requireMember, (req, res) => {
+  const d = getDB();
+  const lists = d.prepare("SELECT DISTINCT list_name, COUNT(*) as count, SUM(CASE WHEN checked = 0 THEN 1 ELSE 0 END) as unchecked FROM ops_lists GROUP BY list_name ORDER BY list_name").all();
+  res.json({ lists });
+});
+
 app.get("/api/lists/:listName", (_req, res) => {
   const d = getDB();
   const listName = _req.params.listName;
-  const items = d.prepare(
-    "SELECT * FROM ops_lists WHERE list_name = ? ORDER BY checked, added_at"
-  ).all(listName);
-  const available = d.prepare(
-    "SELECT DISTINCT list_name FROM ops_lists"
-  ).all().map(r => ({ id: r.list_name, label: r.list_name }));
-  res.json({ items, available_lists: available });
+  try {
+    const items = d.prepare(
+      "SELECT * FROM ops_lists WHERE list_name = ? ORDER BY checked, added_at"
+    ).all(listName);
+    const available = d.prepare(
+      "SELECT DISTINCT list_name FROM ops_lists"
+    ).all().map(r => ({ id: r.list_name, label: r.list_name }));
+    res.json({ items, available_lists: available });
+  } catch(e) {
+    res.json({ items: [], available_lists: [] });
+  }
 });
 
 // --- Scoreboard ---
@@ -1164,6 +1174,55 @@ app.get("/api/settings/gates", requireParent, (req, res) => {
     agent_overrides: gov.agent_overrides || {},
     rate_limits: gov.rate_limits || {},
   });
+});
+
+// --- Settings: Channels ---
+app.get("/api/settings/channels", requireParent, (req, res) => {
+  const d = getDB();
+  const channels = d.prepare("SELECT * FROM comms_channels ORDER BY sort_order").all();
+  const health = d.prepare("SELECT * FROM comms_channel_health").all();
+  res.json({ channels, health });
+});
+
+// --- Settings: System Health ---
+app.get("/api/settings/system-health", requireParent, (req, res) => {
+  const d = getDB();
+  const backups = d.prepare("SELECT * FROM common_audit_log ORDER BY created_at DESC LIMIT 1").get();
+  res.json({ status: 'unhealthy', uptime: 0, python: false, lastAudit: backups?.created_at || null });
+});
+
+// --- Settings: Costs ---
+app.get("/api/settings/costs", requireParent, (req, res) => {
+  res.json({ monthly: {}, daily: {}, total_30d: 0 });
+});
+
+// --- Settings: Models ---
+app.get("/api/settings/models", requireParent, (req, res) => {
+  res.json({ models: [
+    { name: 'Routine (Sonnet)', id: 'claude-sonnet-4-5-20250929', pct: 90 },
+    { name: 'Complex (Opus)', id: 'claude-opus-4-6', pct: 10 }
+  ]});
+});
+
+// --- Settings: Sources ---
+app.get("/api/settings/sources", requireParent, (req, res) => {
+  const d = getDB();
+  try { res.json({ sources: d.prepare("SELECT * FROM common_source_classifications WHERE active = 1").all() }); }
+  catch(e) { res.json({ sources: [] }); }
+});
+
+// --- Settings: Life Phases ---
+app.get("/api/settings/life-phases", requireParent, (req, res) => {
+  const d = getDB();
+  try { res.json({ phases: d.prepare("SELECT * FROM common_life_phases ORDER BY start_date").all() }); }
+  catch(e) { res.json({ phases: [] }); }
+});
+
+// --- Settings: Budget ---
+app.get("/api/settings/budget", requireParent, (req, res) => {
+  const d = getDB();
+  try { res.json({ categories: d.prepare("SELECT * FROM fin_budget_config").all() }); }
+  catch(e) { res.json({ categories: [] }); }
 });
 
 // --- Settings: Household (member management) ---
@@ -1787,13 +1846,26 @@ app.get("/api/settings/captures", requireParent, (req, res) => {
       config[key] = row.value === '1' || row.value === 'true' ? true : row.value;
     }
 
-    // List of capture adapters (static for now)
-    const adapters = [
-      { id: 'chat', name: 'Chat', enabled: true, last_capture: null },
-      { id: 'voice', name: 'Voice', enabled: true, last_capture: null },
-      { id: 'sms', name: 'SMS', enabled: false, last_capture: null },
-      { id: 'email', name: 'Email', enabled: false, last_capture: null },
+    // List of capture adapters
+    const adapterDefs = [
+      { id: 'chat', name: 'Chat', defaultEnabled: true },
+      { id: 'voice', name: 'Voice Memos', defaultEnabled: true },
+      { id: 'sms', name: 'SMS', defaultEnabled: false },
+      { id: 'email', name: 'Email', defaultEnabled: false },
+      { id: 'camera', name: 'Camera / Photos', defaultEnabled: false },
+      { id: 'apple_notes', name: 'Apple Notes', defaultEnabled: false },
+      { id: 'apple_reminders', name: 'Apple Reminders', defaultEnabled: false },
+      { id: 'siri', name: 'Siri Shortcuts', defaultEnabled: false },
+      { id: 'email_forward', name: 'Email Forward-to-PIB', defaultEnabled: false },
+      { id: 'share_sheet', name: 'iOS Share Sheet', defaultEnabled: false },
     ];
+    const adapters = adapterDefs.map(def => {
+      const configKey = `capture_adapter_${def.id}_enabled`;
+      const configRow = d.prepare("SELECT value FROM pib_config WHERE key = ?").get(configKey);
+      const enabled = configRow ? configRow.value === '1' : def.defaultEnabled;
+      const lastRow = d.prepare("SELECT MAX(created_at) as last FROM cap_captures WHERE source = ? AND member_id = ?").get(def.id, req.memberId);
+      return { id: def.id, name: def.name, enabled, last_capture: lastRow?.last || null };
+    });
 
     res.json({ config, adapters });
   } catch (e) {

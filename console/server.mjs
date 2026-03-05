@@ -155,15 +155,22 @@ function getWriteDB() {
 }
 
 function auditLog(db, action, detail, memberId) {
-  // Schema: (ts, table_name, operation, entity_id, old_values, new_values, actor, source, metadata)
-  // action format: "table-operation" or fallback to "unknown"
   const parts = action.split('-');
   const table_name = parts.length > 1 ? parts[0] : 'unknown';
-  const operation = parts.length > 1 ? parts[1].toUpperCase() : 'UPDATE';
-  db.prepare(
-    "INSERT INTO common_audit_log (table_name, operation, actor, source, metadata) " +
-    "VALUES (?, ?, ?, ?, ?)"
-  ).run(table_name, operation, memberId || 'console', 'console', detail);
+  const verb = parts.length > 1 ? parts.slice(1).join('-') : 'update';
+  const OP_MAP = {
+    'complete': 'UPDATE', 'decide': 'UPDATE', 'toggle': 'UPDATE',
+    'set': 'UPDATE', 'add': 'INSERT', 'create': 'INSERT',
+    'deactivate': 'UPDATE', 'confirm': 'UPDATE', 'update': 'UPDATE',
+    'made-it': 'UPDATE', 'adapter-toggle': 'UPDATE', 'item-toggle': 'UPDATE',
+    'snooze': 'UPDATE',
+  };
+  const operation = OP_MAP[verb] || 'UPDATE';
+  try {
+    db.prepare(
+      "INSERT INTO common_audit_log (table_name, operation, actor, source, metadata) VALUES (?,?,?,?,?)"
+    ).run(table_name, operation, memberId || 'console', 'console', detail);
+  } catch(e) { console.error('auditLog failed:', e.message); }
 }
 
 function todayET() {
@@ -775,7 +782,7 @@ app.get("/api/financial/summary", requireMember, (req, res) => {
 
   // Monthly spend by category (from budget config + transactions)
   const budgetRows = d.prepare(
-    "SELECT * FROM fin_budget_config WHERE active = 1"
+    "SELECT * FROM fin_budget_config"
   ).all();
 
   const categories = [];
@@ -796,7 +803,7 @@ app.get("/api/financial/summary", requireMember, (req, res) => {
 
   // Upcoming bills
   const bills = d.prepare(
-    "SELECT * FROM fin_recurring_bills WHERE active = 1 AND next_due_date >= ? ORDER BY next_due_date LIMIT 5"
+    "SELECT * FROM fin_recurring_bills WHERE active = 1 AND next_due >= ? ORDER BY next_due LIMIT 5"
   ).all(today);
 
   // Recent transactions
@@ -1272,10 +1279,10 @@ app.get("/api/people/contacts", requireMember, (req, res) => {
 
   // Extract external contacts from ops_comms (people we've communicated with)
   const externalContacts = d.prepare(
-    "SELECT DISTINCT sender_name as name, sender_handle as phone, " +
+    "SELECT DISTINCT from_addr as phone, " +
     "MAX(created_at) as last, julianday(?) - julianday(MAX(created_at)) as days " +
-    "FROM ops_comms WHERE sender_name IS NOT NULL AND sender_name != '' " +
-    "GROUP BY sender_name ORDER BY last DESC LIMIT 50"
+    "FROM ops_comms WHERE direction = 'inbound' AND from_addr IS NOT NULL AND from_addr != '' " +
+    "GROUP BY from_addr ORDER BY last DESC LIMIT 50"
   ).all(today);
 
   const contacts = [
@@ -1291,7 +1298,7 @@ app.get("/api/people/contacts", requireMember, (req, res) => {
     })),
     ...externalContacts.map(c => ({
       id: crypto.randomUUID(),
-      name: c.name,
+      name: c.phone || "Unknown",
       type: "vendor",
       phone: c.phone,
       last: c.last,
@@ -1308,8 +1315,8 @@ app.get("/api/people/comms", requireMember, (req, res) => {
   const limit = parseInt(req.query.limit || "20", 10);
 
   const comms = d.prepare(
-    "SELECT sender_name as person, channel_id as ch, direction as dir, " +
-    "content as msg, created_at as ts " +
+    "SELECT from_addr as person, channel as ch, direction as dir, " +
+    "summary as subj, created_at as ts " +
     "FROM ops_comms ORDER BY created_at DESC LIMIT ?"
   ).all(limit);
 
@@ -1321,17 +1328,14 @@ app.get("/api/people/observations", requireMember, (req, res) => {
 
   // Observations = long-term memories with category='observation'
   const observations = d.prepare(
-    "SELECT content as note, tags, created_at as ts, member_id " +
+    "SELECT content as note, domain, category, created_at as ts, member_id " +
     "FROM mem_long_term WHERE category = 'observation' OR category = 'facts' " +
     "ORDER BY created_at DESC LIMIT 50"
   ).all();
 
-  // Extract person from tags or content
   const enriched = observations.map(o => {
-    const tags = o.tags ? JSON.parse(o.tags) : [];
-    const person = tags.find(t => t.startsWith("person:"))?.slice(7) || "General";
     return {
-      person,
+      person: o.domain || "General",
       note: o.note,
       ts: o.ts,
     };

@@ -424,6 +424,10 @@ async def seed(db_path: str = "pib.db"):
     print(f"  Life phases: {len(LIFE_PHASES)}")
     print(f"  Coach protocols: {len(COACH_PROTOCOLS)}")
     print(f"  Config entries: {len(PIB_CONFIG)}")
+    print(f"  Channels: {len(channels)}")
+    print(f"  Devices: {len(devices)}")
+    print(f"  Budget categories: {len(budgets)}")
+    print(f"  Recurring tasks: {len(recurring)}")
     await conn.close()
 
 

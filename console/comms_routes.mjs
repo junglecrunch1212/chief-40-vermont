@@ -102,8 +102,23 @@ export function createCommsRouter(getDB, auditLog, guardedWrite) {
 
       const items = db.prepare(sql).all(...params);
 
+      // Apply privacy enforcement
+      const result = items.filter(item => {
+        if (item.direction === 'outbound' && item.member_id !== memberId) return false;
+        if (item.draft_status && item.draft_status !== 'none' && item.member_id !== memberId) return false;
+        const access = db.prepare("SELECT access_level FROM comms_channel_member_access WHERE member_id = ? AND channel_id = ?").get(memberId, item.channel);
+        if (!access || access.access_level === 'none') return false;
+        return true;
+      }).map(item => {
+        const access = db.prepare("SELECT access_level FROM comms_channel_member_access WHERE member_id = ? AND channel_id = ?").get(memberId, item.channel);
+        if (access?.access_level === 'read' && item.member_id !== memberId) {
+          return { ...item, body_snippet: '[privileged — open in source app]', summary: '[busy]' };
+        }
+        return item;
+      });
+
       // Apply privacy filtering for metadata access level
-      const filtered = items.map(item => {
+      const filtered = result.map(item => {
         if (item.access_level === 'metadata') {
           return {
             id: item.id,

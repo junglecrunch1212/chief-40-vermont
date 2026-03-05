@@ -309,6 +309,114 @@ async def seed(db_path: str = "pib.db"):
             [prefix],
         )
 
+    # ── Channels (7) ──
+    channels = [
+        ("ch-gmail-james", "Gmail (James)", "📧", "conversational", "email", 1, 1),
+        ("ch-imessage-james", "iMessage (James)", "💬", "conversational", "imessage", 1, 2),
+        ("ch-sms-james", "SMS (James)", "📱", "conversational", "sms", 1, 3),
+        ("ch-voice-james", "Voicemail (James)", "🎙️", "async", "voice", 1, 4),
+        ("ch-outlook-laura", "Outlook (Laura Work)", "📨", "conversational", "email", 1, 5),
+        ("ch-imessage-laura", "iMessage (Laura)", "💬", "conversational", "imessage", 1, 6),
+        ("ch-whatsapp-family", "WhatsApp Family", "📲", "conversational", "whatsapp", 1, 7),
+    ]
+    for ch in channels:
+        await conn.execute(
+            "INSERT OR IGNORE INTO comms_channels (id, display_name, icon, category, adapter_type, enabled, sort_order) "
+            "VALUES (?,?,?,?,?,?,?)", ch,
+        )
+
+    # ── Channel member access — admin on OWN channels only, zero cross-member, zero for Charlie ──
+    access_rows = [
+        ("cma-1", "m-james", "ch-gmail-james", "admin", 1, "morning"),
+        ("cma-2", "m-james", "ch-imessage-james", "admin", 1, "evening"),
+        ("cma-3", "m-james", "ch-sms-james", "admin", 1, "evening"),
+        ("cma-4", "m-james", "ch-voice-james", "admin", 1, None),
+        ("cma-5", "m-laura", "ch-outlook-laura", "admin", 1, "midday"),
+        ("cma-6", "m-laura", "ch-imessage-laura", "admin", 1, "evening"),
+        ("cma-7", "m-james", "ch-whatsapp-family", "admin", 1, None),
+        ("cma-8", "m-laura", "ch-whatsapp-family", "write", 0, None),
+    ]
+    for a in access_rows:
+        await conn.execute(
+            "INSERT OR IGNORE INTO comms_channel_member_access (id, member_id, channel_id, access_level, can_approve_drafts, batch_window) "
+            "VALUES (?,?,?,?,?,?)", a,
+        )
+
+    # ── Channel health ──
+    for ch in channels:
+        await conn.execute(
+            "INSERT OR IGNORE INTO comms_channel_health (channel_id, status) VALUES (?, 'active')",
+            [ch[0]],
+        )
+
+    # ── Devices (3) ──
+    devices = [
+        ("dev-james-iphone", "James iPhone", "iphone", "m-james"),
+        ("dev-laura-iphone", "Laura iPhone", "iphone", "m-laura"),
+        ("dev-mac-mini", "Mac Mini (Hub)", "mac_mini", None),
+    ]
+    for d in devices:
+        await conn.execute(
+            "INSERT OR IGNORE INTO comms_devices (id, display_name, device_type, owner_member_id) VALUES (?,?,?,?)", d,
+        )
+
+    # ── Accounts (4) ──
+    accounts = [
+        ("acc-gmail-james", "m-james", "gmail", "james@example.com"),
+        ("acc-apple-james", "m-james", "apple_id", "james@example.com"),
+        ("acc-apple-laura", "m-laura", "apple_id", "laura@example.com"),
+        ("acc-outlook-laura", "m-laura", "outlook", "laura@work-domain.com"),
+    ]
+    for a in accounts:
+        await conn.execute(
+            "INSERT OR IGNORE INTO comms_accounts (id, member_id, account_type, account_identifier) VALUES (?,?,?,?)", a,
+        )
+
+    # ── Budget (8 categories) ──
+    budgets = [
+        ("bud-groceries", "Groceries", 800, "🛒"),
+        ("bud-dining", "Dining Out", 300, "🍽️"),
+        ("bud-housing", "Housing", 3200, "🏠"),
+        ("bud-transport", "Transportation", 400, "🚗"),
+        ("bud-health", "Healthcare", 200, "🏥"),
+        ("bud-baby", "Baby Prep", 500, "👶"),
+        ("bud-household", "Household", 300, "🧹"),
+        ("bud-entertainment", "Entertainment", 150, "🎬"),
+    ]
+    for b in budgets:
+        await conn.execute(
+            "INSERT OR IGNORE INTO fin_budget_config (id, category, monthly_target, icon) VALUES (?,?,?,?)", b,
+        )
+
+    # ── Recurring tasks (6) ──
+    recurring = [
+        ("rec-morning-meds", "Morning medication", "daily", "m-james", "health", "07:30"),
+        ("rec-captain-am", "Captain walk (AM)", "daily", "m-james", "household", "09:00"),
+        ("rec-captain-pm", "Captain walk (PM)", "daily", "m-james", "household", "16:00"),
+        ("rec-meal-plan", "Meal planning", "weekly", "m-james", "household", None),
+        ("rec-heartworm", "Captain heartworm medication", "monthly", "m-james", "household", None),
+        ("rec-hvac-filter", "HVAC filter change", "monthly", "m-james", "household", None),
+    ]
+    for r in recurring:
+        await conn.execute(
+            "INSERT OR IGNORE INTO ops_recurring (id, title, frequency, assignee, domain, preferred_time) VALUES (?,?,?,?,?,?)", r,
+        )
+
+    # ── Batch windows config ──
+    batch_configs = [
+        ("batch_morning_start", "08:00", "Morning batch window start"),
+        ("batch_morning_end", "10:00", "Morning batch window end"),
+        ("batch_midday_start", "12:00", "Midday batch window start"),
+        ("batch_midday_end", "13:00", "Midday batch window end"),
+        ("batch_evening_start", "18:00", "Evening batch window start"),
+        ("batch_evening_end", "20:00", "Evening batch window end"),
+    ]
+    for key, val, desc in batch_configs:
+        await conn.execute(
+            "INSERT OR IGNORE INTO pib_config (key, value, description) VALUES (?,?,?)",
+            [key, val, desc],
+        )
+
     await conn.commit()
     print(f"Seeded {db_path} successfully.")
     print(f"  Members: {len(MEMBERS)}")

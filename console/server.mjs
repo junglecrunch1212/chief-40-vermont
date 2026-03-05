@@ -710,62 +710,35 @@ app.get("/api/lists/:listName", (_req, res) => {
 
 // --- Scoreboard ---
 app.get("/api/scoreboard", requireTailscale, (req, res) => {
-  const memberId = req.query.member || req.memberId;
-  
-  // If member-specific view requested (e.g., Charlie's scoreboard)
-  if (memberId) {
-    const d = getDB();
-    const today = todayET();
+  const explicitMember = req.query.member;
+  const d = getDB();
+  const today = todayET();
 
-    // Member energy & completions
-    const energy = d.prepare(
-      "SELECT * FROM pib_energy_states WHERE member_id = ? AND state_date = ?"
-    ).get(memberId, today);
-
-    // Streak
-    const streak = d.prepare(
-      "SELECT * FROM ops_streaks WHERE member_id = ? AND streak_type = 'daily_completion'"
-    ).get(memberId);
-
-    // Chores (for Charlie)
-    const chores = d.prepare(
-      "SELECT id, title, status = 'done' as done, points as stars FROM ops_tasks " +
-      "WHERE assignee = ? AND item_type = 'chore' AND due_date = ? " +
-      "ORDER BY created_at"
-    ).all(memberId, today);
-
-    // Week stars
-    const weekStart = new Date(today);
-    weekStart.setDate(weekStart.getDate() - weekStart.getDay());
-    const weekStartStr = weekStart.toISOString().slice(0, 10);
-
-    const weekStars = d.prepare(
-      "SELECT SUM(points) as total FROM ops_tasks " +
-      "WHERE assignee = ? AND item_type = 'chore' AND status = 'done' " +
-      "AND completed_at >= ?"
-    ).get(memberId, weekStartStr);
-
+  if (explicitMember) {
+    const streak = d.prepare("SELECT * FROM ops_streaks WHERE member_id = ? AND streak_type = 'daily_completion'").get(explicitMember);
+    const chores = d.prepare("SELECT id, title, status = 'done' as done, points as stars FROM ops_tasks WHERE assignee = ? AND item_type = 'chore' AND due_date = ? ORDER BY created_at").all(explicitMember, today);
+    const weekStart = new Date(today); weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+    const weekStars = d.prepare("SELECT SUM(points) as total FROM ops_tasks WHERE assignee = ? AND item_type = 'chore' AND status = 'done' AND completed_at >= ?").get(explicitMember, weekStart.toISOString().slice(0, 10));
     return res.json({
       weekStars: weekStars?.total || 0,
-      streak: streak ? {
-        current: streak.current_streak,
-        best: streak.best_streak,
-        grace: streak.grace_days_used,
-      } : null,
-      nextMilestone: "Pick Friday movie",
-      nextMilestoneTarget: 25,
-      chores: chores.map(c => ({
-        id: c.id,
-        title: c.title,
-        done: !!c.done,
-        stars: c.stars || 1,
-      })),
+      streak: streak ? { current: streak.current_streak, best: streak.best_streak, grace: streak.grace_days_used } : { current: 0, best: 0, grace: 0 },
+      nextMilestone: "Pick Friday movie", nextMilestoneTarget: 25,
+      chores: chores.map(c => ({ id: c.id, title: c.title, done: !!c.done, stars: c.stars || 1 })),
     });
   }
 
-  // Full household scoreboard
-  const result = runCLI("scoreboard-data");
-  res.json(result);
+  const members = d.prepare("SELECT * FROM common_members WHERE active = 1 AND role IN ('parent','child')").all();
+  const cards = members.map(m => {
+    const streak = d.prepare("SELECT * FROM ops_streaks WHERE member_id = ? AND streak_type = 'daily_completion'").get(m.id);
+    const energy = d.prepare("SELECT * FROM pib_energy_states WHERE member_id = ? AND state_date = ?").get(m.id, today);
+    const weekStart = new Date(today); weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+    const weekDone = d.prepare("SELECT COUNT(*) as c FROM ops_tasks WHERE completed_by = ? AND status = 'done' AND completed_at >= ?").get(m.id, weekStart.toISOString().slice(0, 10));
+    return { id: m.id, name: m.display_name, done: energy?.completions_today || 0, wk: weekDone?.c || 0,
+      streak: streak ? { current: streak.current_streak, best: streak.best_streak, grace: streak.grace_days_used } : { current: 0, best: 0, grace: 0 }};
+  });
+  const rewardHistory = d.prepare("SELECT reward_tier as tier, reward_text as msg, created_at as ts FROM pib_reward_log ORDER BY created_at DESC LIMIT 10").all();
+  const domainWins = d.prepare("SELECT domain as d, COUNT(*) as n FROM ops_tasks WHERE status = 'done' AND completed_at >= date('now', '-7 days') GROUP BY domain ORDER BY n DESC").all();
+  res.json({ cards, rewardHistory, domainWins: domainWins.map(r => ({ d: r.d, n: r.n })), familyTotal: { points: cards.reduce((s, c) => s + c.wk, 0) }});
 });
 
 // --- Budget ---

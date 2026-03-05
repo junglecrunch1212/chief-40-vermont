@@ -203,17 +203,16 @@ export function createChannelRouter(getDB, auditLog, guardedWrite) {
   // GET /api/devices — list all devices
   router.get("/devices", (req, res) => {
     const db = getDB();
+    const memberId = req.memberId;
 
     try {
       const devices = db.prepare(`
-        SELECT 
-          cd.*,
-          cm.display_name as owner_name
-        FROM comms_devices cd
-        LEFT JOIN common_members cm ON cm.id = cd.owner_member_id
-        WHERE cd.active = 1
-        ORDER BY cd.status DESC, cd.display_name
-      `).all();
+        SELECT DISTINCT d.* FROM comms_devices d
+        LEFT JOIN comms_channel_devices cd ON cd.device_id = d.id
+        LEFT JOIN comms_channel_member_access cma ON cma.channel_id = cd.channel_id AND cma.member_id = ?
+        WHERE cma.access_level IS NOT NULL AND cma.access_level != 'none'
+           OR d.owner_member_id = ?
+      `).all(memberId, memberId);
 
       res.json({ devices });
     } catch (e) {

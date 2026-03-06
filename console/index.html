@@ -372,6 +372,23 @@ const captureBar = `
     </div>
   </div>`;
 
+window._toggleMeds = async () => {
+  try { await POST('/api/energy', { meds: true }); renderPage(); }
+  catch(e) { console.error('Meds update failed:', e); }
+};
+window._cycleSleep = async () => {
+  const cycle = { rough:'okay', okay:'great', great:'rough', undefined:'okay' };
+  const current = lastKnownData.todayStream?.energy?.sleep;
+  try { await POST('/api/energy', { sleep: cycle[current] || 'okay' }); renderPage(); }
+  catch(e) { console.error('Sleep update failed:', e); }
+};
+window._cycleEnergy = async () => {
+  const cycle = { low:'medium', medium:'high', high:'low', undefined:'medium' };
+  const current = lastKnownData.todayStream?.energy?.level;
+  try { await POST('/api/energy', { level: cycle[current] || 'medium' }); renderPage(); }
+  catch(e) { console.error('Energy update failed:', e); }
+};
+
 window._quickCapture = async (text) => {
   try {
     await POST('/api/capture', { text, source: 'console' });
@@ -411,8 +428,21 @@ function renderPage() {
 // ── TODAY — James Carousel ──
 async function renderTodayJames() {
   const m = document.getElementById('main');
+  let data;
   try {
-    const data = await GET(`/api/today-stream?member=${currentActor}`);
+    data = await GET(`/api/today-stream?member=${currentActor}`);
+    if (data.error === 'cli_failed' && lastKnownData.todayStream) {
+      data = lastKnownData.todayStream;
+      degradedMode = true;
+    } else if (data.error === 'cli_failed') {
+      m.innerHTML = `<div class="fi"><div class="card" style="text-align:center;padding:48px">
+        <div style="font-size:24px;margin-bottom:12px">🔄</div>
+        <div style="font-size:16px;font-weight:600">PIB is starting up...</div>
+        <div style="font-size:13px;color:var(--tx3);margin-top:8px">The engine is initializing. Retrying in 10 seconds.</div>
+      </div></div>`;
+      setTimeout(() => renderTodayJames(), 10000);
+      return;
+    }
     lastKnownData.todayStream = data;
     const stream = data.stream||[];
     const energy = data.energy||{level:'medium',meds:false,sleep:'okay',completions:0,cap:15};
@@ -448,14 +478,14 @@ async function renderTodayJames() {
     
     m.innerHTML = `<div class="fi" style="max-width:640px;margin:0 auto">
       <div style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap">
-        <div style="padding:8px 14px;background:var(--bg-card);border:1px solid var(--bd);border-radius:10px;display:flex;align-items:center;gap:8px">
-          <span style="font-size:13px;font-weight:600;color:${energy.meds?'var(--grn)':'var(--warn)'}">${energy.meds?'✓ Meds':'⏰ Meds'}</span>
+        <button onclick="window._toggleMeds()" style="cursor:pointer;border:1px solid var(--bd);padding:8px 14px;background:${energy.meds?'var(--grn-bg)':'var(--err-bg)'};border-radius:10px;display:flex;align-items:center;gap:8px">
+          <span style="font-size:13px;font-weight:600;color:${energy.meds?'var(--grn)':'var(--err)'}">${energy.meds?'✓ Meds':'✗ Meds'}</span>
           ${energy.meds_at?`<span style="font-size:11px;color:var(--tx3)">${esc(energy.meds_at)}</span>`:''}
-        </div>
-        <div style="padding:8px 14px;background:var(--bg-card);border:1px solid var(--bd);border-radius:10px;display:flex;align-items:center;gap:8px">
+        </button>
+        <button onclick="window._cycleEnergy()" style="cursor:pointer;border:1px solid var(--bd);padding:8px 14px;background:var(--bg-card);border-radius:10px;display:flex;align-items:center;gap:8px">
           <span style="font-size:13px;font-weight:600;text-transform:capitalize">${esc(energy.level)}</span>
           <span style="font-size:10px;color:var(--tx3);text-transform:uppercase;letter-spacing:.3px">Energy</span>
-        </div>
+        </button>
         <div style="padding:8px 14px;background:var(--bg-card);border:1px solid var(--bd);border-radius:10px;display:flex;align-items:center;gap:8px">
           <span style="font-size:13px;font-weight:600">${doneCount}/${energy.cap||15}</span>
           <span style="font-size:10px;color:var(--tx3);text-transform:uppercase;letter-spacing:.3px">Velocity</span>
@@ -550,6 +580,14 @@ async function completeFromStream(taskId) {
     // Store reward message
     if (res.reward_message) {
       lastKnownData.rewardMessage = res.reward_message;
+      const tc = {simple:'var(--tx3)',warm:'var(--teal)',delight:'var(--lav)',jackpot:'var(--pink)'};
+      const te = {simple:'✓',warm:'🔥',delight:'✨',jackpot:'🎰'};
+      const toast = document.createElement('div');
+      toast.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--bg-card);border:2px solid '+(tc[res.reward_tier]||'var(--bd)')+';border-radius:16px;padding:24px 32px;text-align:center;z-index:1000;box-shadow:0 8px 32px rgba(0,0,0,0.15);opacity:0;transition:opacity .3s';
+      toast.innerHTML = '<div style="font-size:32px;margin-bottom:8px">'+(te[res.reward_tier]||'✓')+'</div><div style="font-size:16px;font-weight:600;color:var(--tx)">'+esc(res.reward_message)+'</div>'+(res.one_more?'<div style="font-size:13px;color:var(--tx3);margin-top:8px">'+esc(res.one_more)+'</div>':'');
+      document.body.appendChild(toast);
+      requestAnimationFrame(()=>toast.style.opacity='1');
+      setTimeout(()=>{toast.style.opacity='0';setTimeout(()=>toast.remove(),300)},res.reward_tier==='jackpot'?4000:2000);
       setTimeout(() => { lastKnownData.rewardMessage = null; renderPage(); }, 5000);
     }
     renderPage(); 

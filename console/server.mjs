@@ -27,11 +27,13 @@ import {
 } from "../scripts/core/behavioral_engine.mjs";
 import { createCommsRouter } from "./comms_routes.mjs";
 import { createChannelRouter } from "./channel_routes.mjs";
+import { createBrainRouter } from "./brain_routes.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, "..");
 const PORT = parseInt(process.env.PIB_CONSOLE_PORT || "3333", 10);
 const DB_PATH = process.env.PIB_DB_PATH || "/opt/pib/data/pib.db";
+const PYTHON = process.env.PIB_PYTHON || "python3";
 
 // ═══════════════════════════════════════════════════════════
 // RATE LIMITER (per spec §3.3)
@@ -119,7 +121,7 @@ function runCLI(command, args = {}, memberId = null) {
     cliArgs.push("--member", memberId);
   }
   try {
-    const result = execFileSync("python", cliArgs, {
+    const result = execFileSync(PYTHON, cliArgs, {
       cwd: ROOT,
       env: { ...process.env, PIB_DB_PATH: DB_PATH, PIB_CALLER_AGENT: "cos" },
       timeout: 30000,
@@ -280,6 +282,34 @@ const commsRouter = createCommsRouter(getDB, auditLog, guardedWrite);
 const channelRouter = createChannelRouter(getDB, auditLog, guardedWrite);
 app.use("/api/comms", requireMember, commsRouter);
 app.use("/api/channels", requireMember, channelRouter);
+const brainRouter = createBrainRouter(getDB, auditLog, guardedWrite);
+app.use("/api/brain", requireMember, brainRouter);
+
+app.get("/api/accounts", requireMember, (req, res) => {
+  req.url = "/accounts" + (req.url.includes("?") ? req.url.substring(req.url.indexOf("?")) : "");
+  channelRouter.handle(req, res);
+});
+
+app.post("/api/energy", requireMember, (req, res) => {
+  const { level, sleep, meds, focus } = req.body;
+  const wdb = getWriteDB();
+  const today = todayET();
+  try {
+    wdb.prepare(`
+      INSERT INTO pib_energy_states (member_id, state_date, energy_level, sleep_quality, meds_taken, meds_taken_at, focus_mode)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(member_id, state_date) DO UPDATE SET
+        energy_level = COALESCE(excluded.energy_level, energy_level),
+        sleep_quality = COALESCE(excluded.sleep_quality, sleep_quality),
+        meds_taken = COALESCE(excluded.meds_taken, meds_taken),
+        meds_taken_at = CASE WHEN excluded.meds_taken = 1 THEN datetime('now') ELSE meds_taken_at END,
+        focus_mode = COALESCE(excluded.focus_mode, focus_mode)
+    `).run(req.memberId, today, level||null, sleep||null, meds!=null?(meds?1:0):null, null, focus!=null?(focus?1:0):null);
+    auditLog(wdb, "energy-update", JSON.stringify({level,sleep,meds,focus}), req.memberId);
+    wdb.close();
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
 
 // ═══════════════════════════════════════════════════════════
 // IDENTITY — Tailscale Serve headers → member resolution
@@ -418,10 +448,29 @@ function requireTailscale(req, res, next) {
 // API ROUTES — READS (direct SQLite)
 // ═══════════════════════════════════════════════════════════
 
+// --- Identity ---
+app.get("/api/me", (req, res) => {
+  const identity = resolveIdentity(req);
+  if (!identity || !identity.memberId) return res.json({ authenticated: false });
+  res.json({
+    authenticated: true, source: identity.source,
+    member_id: identity.memberId,
+    display_name: identity.viewMember?.display_name,
+    role: identity.role,
+    view_mode: identity.viewMember?.view_mode,
+  });
+});
+
 // --- Health ---
-app.get("/api/health", (_req, res) => {
-  const result = runCLI("health");
-  res.json(result);
+app.get("/api/health", (req, res) => {
+  const cliResult = runCLI("health");
+  if (cliResult && !cliResult.error) return res.json(cliResult);
+  const d = getDB();
+  try {
+    const tables = d.prepare("SELECT COUNT(*) as c FROM sqlite_master WHERE type='table'").get()?.c || 0;
+    const members = d.prepare("SELECT COUNT(*) as c FROM common_members WHERE active = 1").get()?.c || 0;
+    res.json({ status: 'degraded', python: false, node: true, db: { tables, members }, uptime: Math.floor(process.uptime()) });
+  } catch(e) { res.json({ status: 'unhealthy', error: e.message }); }
 });
 
 // --- Who Am I ---
@@ -577,8 +626,17 @@ app.get("/api/today-stream", requireMember, (req, res) => {
     activeIdx = stream.length - 1; // Last item if all done
   }
 
+  const summaryParts = [];
+  if (energy?.meds_taken) summaryParts.push('Meds ✓');
+  else if (new Date().getHours() >= 8) summaryParts.push('Meds not taken');
+  if (energy?.energy_level) summaryParts.push('Energy: ' + energy.energy_level);
+  const overdueCount = d.prepare("SELECT COUNT(*) as c FROM ops_tasks WHERE assignee = ? AND status IN ('next','in_progress') AND due_date < ?").get(memberId, today)?.c || 0;
+  if (overdueCount > 0) summaryParts.push(overdueCount + ' overdue');
+  if (streak?.current_streak > 0) summaryParts.push('🔥 ' + streak.current_streak + '-day streak');
+
   res.json({
     stream,
+    summary: summaryParts.join(' · ') || null,
     activeIdx: Math.max(0, activeIdx),
     energy: energy ? {
       level: energy.energy_level,
@@ -873,7 +931,7 @@ app.get("/api/chat/stream", requireMember, (req, res) => {
   res.flushHeaders();
 
   // Spawn Python CLI streaming chat process
-  const proc = spawn("python", [
+  const proc = spawn(PYTHON, [
     "-m", "pib.cli", "chat-stream", DB_PATH,
     "--session-id", sessionId,
     "--member", req.memberId
@@ -2074,6 +2132,20 @@ const BIND_HOST = process.env.PIB_ENV === 'dev' ? '0.0.0.0' : '127.0.0.1';
 app.listen(PORT, BIND_HOST, () => {
   console.log(`PIB Console on http://${BIND_HOST}:${PORT}${BIND_HOST === '127.0.0.1' ? ' (Tailscale Serve will proxy)' : ' (dev mode — open)'}`);
   console.log(`Database: ${DB_PATH}`);
+  console.log('');
+  console.log('PIB v5 — Startup Check');
+  console.log('─'.repeat(40));
+  try {
+    const d = getDB();
+    const t = d.prepare("SELECT COUNT(*) as c FROM sqlite_master WHERE type='table'").get()?.c;
+    const m = d.prepare("SELECT COUNT(*) as c FROM common_members WHERE active = 1").get()?.c;
+    console.log(`  DB: ${t} tables, ${m} members`);
+  } catch(e) { console.log('  DB: ERROR — ' + e.message); }
+  try { const r = execFileSync(PYTHON, ["--version"], {timeout:5000}); console.log('  Python: ' + r.toString().trim()); }
+  catch(e) { console.log('  Python: NOT FOUND — LLM features unavailable until bootstrap'); }
+  try { execFileSync("tailscale", ["version"], {timeout:5000}); console.log('  Tailscale: installed'); }
+  catch(e) { console.log('  Tailscale: not found'); }
+  console.log('─'.repeat(40));
 });
 
 export default app;

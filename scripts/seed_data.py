@@ -417,6 +417,38 @@ async def seed(db_path: str = "pib.db"):
             [key, val, desc],
         )
 
+    # ── Sensors ──
+    try:
+        from pib.sensors.seed import seed_sensors
+        await seed_sensors(conn)
+        print("  Sensors: 25 definitions seeded")
+    except Exception as e:
+        print(f"  Sensors: skipped ({e})")
+
+    # ── Notebooks ──
+    try:
+        from pib.capture import ensure_member_notebooks
+        for mid in ["m-james", "m-laura"]:
+            await ensure_member_notebooks(conn, mid)
+        print("  Notebooks: seeded for James + Laura")
+    except Exception as e:
+        print(f"  Notebooks: skipped ({e})")
+
+    # ── Comms batch window config (comms-specific) ──
+    comms_batch_keys = [
+        ("comms_batch_morning_start", "07:00", "Morning batch start"),
+        ("comms_batch_morning_end", "11:00", "Morning batch end"),
+        ("comms_batch_midday_start", "11:00", "Midday batch start"),
+        ("comms_batch_midday_end", "16:00", "Midday batch end"),
+        ("comms_batch_evening_start", "16:00", "Evening batch start"),
+        ("comms_batch_evening_end", "22:00", "Evening batch end"),
+    ]
+    for key, val, desc in comms_batch_keys:
+        await conn.execute(
+            "INSERT OR IGNORE INTO pib_config (key, value, description) VALUES (?,?,?)",
+            [key, val, desc])
+    print(f"  Comms batch config: {len(comms_batch_keys)} keys")
+
     await conn.commit()
     print(f"Seeded {db_path} successfully.")
     print(f"  Members: {len(MEMBERS)}")
@@ -428,6 +460,8 @@ async def seed(db_path: str = "pib.db"):
     print(f"  Devices: {len(devices)}")
     print(f"  Budget categories: {len(budgets)}")
     print(f"  Recurring tasks: {len(recurring)}")
+    print(f"  Batch config: {len(batch_configs)} keys")
+    print(f"  Comms batch config: {len(comms_batch_keys)} keys")
     await conn.close()
 
 

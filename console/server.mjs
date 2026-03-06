@@ -1070,6 +1070,24 @@ app.post("/api/tasks/:id/skip", requireMember, (req, res) => {
   res.json(result);
 });
 
+app.post("/api/tasks/:id/triage", requireMember, (req, res) => {
+  const { status } = req.body;
+  if (!['next', 'dismissed', 'waiting'].includes(status)) {
+    return res.status(400).json({ error: "Triage status must be 'next', 'dismissed', or 'waiting'" });
+  }
+  const d = getDB();
+  const task = d.prepare("SELECT * FROM ops_tasks WHERE id = ?").get(req.params.id);
+  if (!task) return res.status(404).json({ error: "Task not found" });
+  if (task.status !== 'inbox') return res.status(400).json({ error: "Can only triage inbox tasks" });
+  const wdb = getWriteDB();
+  try {
+    wdb.prepare("UPDATE ops_tasks SET status = ?, updated_at = datetime('now') WHERE id = ?").run(status, req.params.id);
+    auditLog(wdb, "task-triage", JSON.stringify({ id: req.params.id, from: 'inbox', to: status }), req.memberId);
+    wdb.close();
+    res.json({ ok: true, status });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 app.post("/api/tasks", requireMember, (req, res) => {
   const result = runCLI("task-create", req.body, req.memberId);
   res.json(result);

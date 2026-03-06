@@ -388,10 +388,10 @@ window._taskAction = async (taskId, action) => {
       }
     } else if (action === 'skip') {
       await POST(`/api/tasks/${taskId}/skip`, {});
-    } else if (action === 'accept') {
-      await POST(`/api/tasks/${taskId}/complete`, {member:currentActor, accept: true});
-    } else if (action === 'dismiss') {
-      await POST(`/api/tasks/${taskId}/skip`, {dismiss: true});
+    } else if (action === 'triage_accept') {
+      await POST(`/api/tasks/${taskId}/triage`, {status: 'next'});
+    } else if (action === 'triage_dismiss') {
+      await POST(`/api/tasks/${taskId}/triage`, {status: 'dismissed'});
     }
     renderPage();
   } catch(e) { console.error('Task action failed:', e); alert('Action failed: ' + e.message); }
@@ -818,8 +818,8 @@ async function renderTasks() {
           <tbody>${tasks.map(t=>{
             const actions = [];
             if (t.status === 'inbox') {
-              actions.push(`<button class="btn-p btn-sm" onclick="window._taskAction('${esc(t.id)}','accept')">Accept</button>`);
-              actions.push(`<button class="btn-s btn-sm" onclick="window._taskAction('${esc(t.id)}','dismiss')">Dismiss</button>`);
+              actions.push(`<button class="btn-p btn-sm" onclick="window._taskAction('${esc(t.id)}','triage_accept')">✓ Accept</button>`);
+              actions.push(`<button class="btn-s btn-sm" onclick="window._taskAction('${esc(t.id)}','triage_dismiss')">✗ Dismiss</button>`);
             } else if (t.status !== 'done' && t.status !== 'dismissed') {
               actions.push(`<button class="btn-p btn-sm" onclick="window._taskAction('${esc(t.id)}','complete')">✓ Done</button>`);
               actions.push(`<button class="btn-s btn-sm" onclick="window._taskAction('${esc(t.id)}','skip')">Skip</button>`);

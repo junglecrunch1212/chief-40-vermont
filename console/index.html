@@ -907,6 +907,8 @@ let commsFilter = 'all';
 let commsChannelFilter = null;
 let commsIdentityPicker = null;
 let commsSort = 'urgency';
+let commsView = 'triage'; // 'triage' (one-at-a-time) or 'browse' (list)
+let commsTriageIdx = 0;
 
 async function renderComms() {
   const m = document.getElementById('main');
@@ -969,8 +971,8 @@ async function renderComms() {
       };
       
       m.innerHTML = `<div class="fi" style="display:flex;gap:20px">
-        <!-- Channel Sidebar -->
-        <div style="width:240px;flex-shrink:0">
+        <!-- Channel Sidebar (hidden in triage mode) -->
+        <div style="width:240px;flex-shrink:0;${commsView==='triage'?'display:none':''}">
           <h2 style="font-size:18px;font-weight:600;font-family:var(--head);margin-bottom:16px">Channels</h2>
           
           ${Object.entries(channelsByCategory).map(([cat, chans]) => chans.length ? `
@@ -1004,9 +1006,97 @@ async function renderComms() {
             <div style="display:flex;align-items:center;gap:8px">
               <span id="comms-badge" class="badge badge-pink">${counts.needs_response || 0} need response</span>
               ${counts.urgent > 0 ? `<span class="badge badge-err">${counts.urgent} urgent</span>` : ''}
+              <button class="btn-s btn-sm" onclick="window._toggleCommsView()" style="font-size:12px">
+                ${commsView==='triage' ? '☰ Browse' : '⚡ Triage'}
+              </button>
             </div>
           </div>
           
+          ${commsView === 'triage' ? (() => {
+            // TRIAGE MODE: one message at a time, pre-sorted by urgency then recency
+            const triageItems = [...items].sort((a,b) => {
+              const uo = {urgent:0,timely:1,normal:2};
+              const ud = (uo[a.response_urgency]||2) - (uo[b.response_urgency]||2);
+              if (ud !== 0) return ud;
+              return (b.created_at||'').localeCompare(a.created_at||'');
+            });
+            const needsAction = triageItems.filter(i => i.needs_response || i.draft_status === 'pending');
+            const fyi = triageItems.filter(i => !i.needs_response && i.draft_status !== 'pending');
+            const allTriage = [...needsAction, ...fyi];
+            const total = allTriage.length;
+            if (total === 0) return '<div class="card" style="text-align:center;padding:60px"><div style="font-size:48px;margin-bottom:16px">🎉</div><div style="font-size:18px;font-weight:600">Inbox Zero</div><div style="font-size:14px;color:var(--tx3);margin-top:8px">Nothing needs your attention right now.</div></div>';
+            const idx = Math.min(commsTriageIdx, total - 1);
+            const item = allTriage[idx];
+            const isDraft = item.draft_status === 'pending';
+            const isMetadataOnly = item.access_level === 'metadata';
+            const pct = total > 0 ? Math.round((idx / total) * 100) : 0;
+            const urgColor = item.response_urgency === 'urgent' ? 'var(--err)' : item.response_urgency === 'timely' ? 'var(--warn)' : 'var(--tx3)';
+            return `
+              <!-- Progress bar -->
+              <div style="margin-bottom:20px">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                  <span style="font-size:13px;font-weight:600;color:var(--tx2)">${idx + 1} of ${total}</span>
+                  <span style="font-size:12px;color:var(--tx3)">${needsAction.length} need action · ${fyi.length} FYI</span>
+                </div>
+                <div style="height:4px;border-radius:2px;background:var(--bg-input);overflow:hidden">
+                  <div style="height:100%;width:${pct}%;background:var(--pink);border-radius:2px;transition:width .3s"></div>
+                </div>
+                <div style="display:flex;gap:3px;margin-top:8px;justify-content:center">
+                  ${allTriage.map((t,i) => {
+                    const dotColor = i < idx ? 'var(--grn)' : i === idx ? 'var(--pink)' : t.needs_response ? 'var(--warn)' : 'var(--bg-input)';
+                    return '<div style="width:8px;height:8px;border-radius:50%;background:'+dotColor+';cursor:pointer" onclick="commsTriageIdx='+i+';window._commsLoad()"></div>';
+                  }).join('')}
+                </div>
+              </div>
+              
+              <!-- Current message card -->
+              <div class="card" style="border-left:4px solid ${urgColor};padding:24px">
+                <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
+                  <span style="font-size:24px">${esc(item.channel_icon || '💬')}</span>
+                  <div style="flex:1">
+                    <div style="font-size:11px;font-weight:600;color:${urgColor};text-transform:uppercase;letter-spacing:.5px">${esc(item.response_urgency || 'normal')}${item.needs_response ? ' · needs response' : ' · FYI'}</div>
+                    <div style="font-size:12px;color:var(--tx3)">${esc(item.channel_name || '')} · ${esc(item.created_at || '')}</div>
+                  </div>
+                  ${isDraft ? '<span class="badge badge-lav">DRAFT</span>' : ''}
+                </div>
+                
+                <div style="font-size:18px;font-weight:600;margin-bottom:12px;line-height:1.3">${isMetadataOnly ? '🔒 Private' : esc(item.summary || item.subject || 'No subject')}</div>
+                
+                ${item.from_addr ? `<div style="font-size:13px;color:var(--tx2);margin-bottom:12px">From: <strong>${esc(item.from_addr)}</strong></div>` : ''}
+                
+                ${!isMetadataOnly && item.body_snippet ? `
+                  <div style="font-size:15px;color:var(--tx);line-height:1.6;padding:16px;background:var(--bg);border-radius:10px;margin-bottom:16px">${esc(item.body_snippet)}</div>
+                ` : isMetadataOnly ? `
+                  <div style="font-size:14px;color:var(--tx3);padding:16px;background:var(--bg-input);border-radius:10px;margin-bottom:16px">🔒 Content hidden — metadata-only access</div>
+                ` : ''}
+                
+                ${isDraft && item.draft_response ? `
+                  <div style="background:var(--lav-bg);border:1px solid var(--lav);border-radius:10px;padding:16px;margin-bottom:16px">
+                    <div style="font-size:11px;font-weight:600;color:var(--lav);text-transform:uppercase;margin-bottom:8px">Draft Response</div>
+                    <div style="font-size:14px;line-height:1.6">${esc(item.draft_response)}</div>
+                  </div>
+                ` : ''}
+                
+                <!-- Actions — big, tappable, one clear next step -->
+                <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px">
+                  ${isDraft ? `
+                    <button class="btn-p" onclick="window._sendDraft('${esc(item.id)}');commsTriageIdx++;window._commsLoad()" style="flex:1;padding:14px">✅ Send Draft</button>
+                    <button class="btn-d" onclick="window._rejectDraft('${esc(item.id)}');commsTriageIdx++;window._commsLoad()" style="flex:1;padding:14px">❌ Reject</button>
+                  ` : item.needs_response ? `
+                    <button class="btn-p" onclick="window._draftReply('${esc(item.id)}')" style="flex:1;padding:14px">✍️ Reply</button>
+                    <button class="btn-s" onclick="window._snoozeComm('${esc(item.id)}');commsTriageIdx++;window._commsLoad()" style="padding:14px">⏰ Snooze</button>
+                    <button class="btn-s" onclick="window._archiveComm('${esc(item.id)}');commsTriageIdx++;window._commsLoad()" style="padding:14px">Archive</button>
+                  ` : `
+                    <button class="btn-p" onclick="commsTriageIdx++;window._commsLoad()" style="flex:1;padding:14px">👀 Noted — Next</button>
+                    <button class="btn-s" onclick="window._archiveComm('${esc(item.id)}');commsTriageIdx++;window._commsLoad()" style="padding:14px">Archive</button>
+                  `}
+                </div>
+              </div>
+              
+              <!-- Keyboard hint -->
+              <div style="text-align:center;margin-top:16px;font-size:12px;color:var(--tx4)">← → arrow keys to navigate · Enter to take primary action</div>
+            `;
+          })() : `
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:12px">
             <div class="pill-tabs">
               ${['all','needs_response','urgent','drafts','snoozed'].map(f => `
@@ -1168,9 +1258,18 @@ async function renderComms() {
   }
   
   // Action handlers
-  window._filterComms = (filter) => { commsFilter = filter; load(); };
-  window._filterChannel = (channelId) => { commsChannelFilter = commsChannelFilter === channelId ? null : channelId; load(); };
+  window._commsLoad = load;
+  window._filterComms = (filter) => { commsFilter = filter; commsTriageIdx = 0; load(); };
+  window._filterChannel = (channelId) => { commsChannelFilter = commsChannelFilter === channelId ? null : channelId; commsTriageIdx = 0; load(); };
   window._sortComms = (sort) => { commsSort = sort; load(); };
+  window._toggleCommsView = () => { commsView = commsView === 'triage' ? 'browse' : 'triage'; commsTriageIdx = 0; load(); };
+  
+  // Keyboard nav for triage mode
+  document.onkeydown = (e) => {
+    if (currentPage !== 'comms' || commsView !== 'triage') return;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { commsTriageIdx++; load(); e.preventDefault(); }
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { commsTriageIdx = Math.max(0, commsTriageIdx - 1); load(); e.preventDefault(); }
+  };
   
   window._draftReply = async (id) => {
     try {

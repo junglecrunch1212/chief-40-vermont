@@ -906,6 +906,7 @@ async function renderLists() {
 let commsFilter = 'all';
 let commsChannelFilter = null;
 let commsIdentityPicker = null;
+let commsSort = 'urgency';
 
 async function renderComms() {
   const m = document.getElementById('main');
@@ -934,8 +935,24 @@ async function renderComms() {
       if (params.length) url += '?' + params.join('&');
       
       const inboxData = await GET(url);
-      const items = inboxData.items || [];
+      let items = inboxData.items || [];
       
+      // Sort items
+      const urgencyOrder = {urgent:0, timely:1, normal:2};
+      if (commsSort === 'urgency') {
+        items.sort((a,b) => (urgencyOrder[a.response_urgency]||2) - (urgencyOrder[b.response_urgency]||2) || (b.created_at||'').localeCompare(a.created_at||''));
+      } else if (commsSort === 'newest') {
+        items.sort((a,b) => (b.created_at||'').localeCompare(a.created_at||''));
+      } else if (commsSort === 'oldest') {
+        items.sort((a,b) => (a.created_at||'').localeCompare(b.created_at||''));
+      } else if (commsSort === 'sender') {
+        items.sort((a,b) => (a.from_addr||a.summary||'').localeCompare(b.from_addr||b.summary||''));
+      } else if (commsSort === 'channel') {
+        items.sort((a,b) => (a.channel_name||'').localeCompare(b.channel_name||''));
+      } else if (commsSort === 'subject') {
+        items.sort((a,b) => (a.subject||a.summary||'').localeCompare(b.subject||b.summary||''));
+      }
+
       // Group channels by category
       const channelsByCategory = {
         bidirectional: channels.filter(c => c.category === 'conversational'),
@@ -990,13 +1007,20 @@ async function renderComms() {
             </div>
           </div>
           
-          <div class="pill-tabs" style="margin-bottom:20px">
-            ${['all','needs_response','urgent','drafts','snoozed'].map(f => `
-              <button class="pill ${f===commsFilter?'active':''}" onclick="window._filterComms('${f}')">
-                ${f.replace(/_/g,' ')}
-                ${f==='drafts'&&counts.drafts_pending>0?` (${counts.drafts_pending})`:f==='urgent'&&counts.urgent>0?` (${counts.urgent})`:''}
-              </button>
-            `).join('')}
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:12px">
+            <div class="pill-tabs">
+              ${['all','needs_response','urgent','drafts','snoozed'].map(f => `
+                <button class="pill ${f===commsFilter?'active':''}" onclick="window._filterComms('${f}')">
+                  ${f.replace(/_/g,' ')}
+                  ${f==='drafts'&&counts.drafts_pending>0?` (${counts.drafts_pending})`:f==='urgent'&&counts.urgent>0?` (${counts.urgent})`:''}
+                </button>
+              `).join('')}
+            </div>
+            <select onchange="window._sortComms(this.value)" style="font-size:13px;padding:6px 12px;border-radius:8px;border:1px solid var(--bd);background:var(--bg-card);color:var(--tx)">
+              ${[['urgency','Sort: Urgency'],['newest','Sort: Newest'],['oldest','Sort: Oldest'],['sender','Sort: Sender'],['channel','Sort: Channel'],['subject','Sort: Subject']].map(([v,l])=>
+                `<option value="${v}" ${commsSort===v?'selected':''}>${l}</option>`
+              ).join('')}
+            </select>
           </div>
           
           ${items.length === 0 ? `
@@ -1012,14 +1036,12 @@ async function renderComms() {
               </div>
             </div>
           ` : `
-            <!-- Urgency Groups -->
-            ${Object.entries(itemsByUrgency).map(([urgency, urgentItems]) => urgentItems.length ? `
+            <!-- Items (grouped by urgency when sorted by urgency, flat otherwise) -->
+            ${commsSort === 'urgency' ? Object.entries(itemsByUrgency).map(([urgency, urgentItems]) => urgentItems.length ? `
               <div style="margin-bottom:24px">
                 <div style="font-size:12px;font-weight:600;color:var(--tx3);letter-spacing:.5px;text-transform:uppercase;margin-bottom:12px;display:flex;align-items:center;gap:8px">
                   ${urgency === 'urgent' ? '🔴' : urgency === 'timely' ? '🟡' : '⚪'} ${urgency}
                 </div>
-                
-                <!-- Cards within urgency -->
                 ${urgentItems.map(item => {
                   const isDraft = item.draft_status === 'pending';
                   const isMetadataOnly = item.access_level === 'metadata';
@@ -1083,7 +1105,36 @@ async function renderComms() {
                   `;
                 }).join('')}
               </div>
-            ` : '').join('')}
+            ` : '').join('') : items.map(item => {
+                  const isDraft = item.draft_status === 'pending';
+                  const isMetadataOnly = item.access_level === 'metadata';
+                  const urgencyDot = item.response_urgency === 'urgent' ? '🔴' : item.response_urgency === 'timely' ? '🟡' : '';
+                  return `
+                    <div class="card" style="margin-bottom:12px;${isDraft?'border-left:4px solid var(--lav)':''}">
+                      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+                        <span style="font-size:16px">${esc(item.channel_icon || '💬')}</span>
+                        <span style="font-weight:600;font-size:14px;flex:1">${isMetadataOnly ? '[Private]' : esc(item.summary || item.subject || 'No subject')}</span>
+                        ${urgencyDot ? `<span>${urgencyDot}</span>` : ''}
+                        ${isDraft ? '<span class="badge badge-lav" style="font-size:11px">DRAFT</span>' : ''}
+                      </div>
+                      <div style="font-size:12px;color:var(--tx3);margin-bottom:8px">
+                        ${esc(item.from_addr||'')} · ${esc(item.channel_name || '')} · ${esc(item.created_at || '')}
+                      </div>
+                      ${!isMetadataOnly && item.body_snippet ? `<div style="font-size:13px;color:var(--tx2);margin-bottom:8px">${esc(item.body_snippet)}</div>` : ''}
+                      <div style="display:flex;gap:8px">
+                        ${isDraft ? `
+                          <button class="btn-g btn-sm" onclick="window._sendDraft('${esc(item.id)}')">✅ Send</button>
+                          <button class="btn-d btn-sm" onclick="window._rejectDraft('${esc(item.id)}')">❌ Reject</button>
+                        ` : item.needs_response ? `
+                          <button class="btn-p btn-sm" onclick="window._draftReply('${esc(item.id)}')">✍️ Draft</button>
+                          <button class="btn-s btn-sm" onclick="window._archiveComm('${esc(item.id)}')">Archive</button>
+                          <button class="btn-s btn-sm" onclick="window._snoozeComm('${esc(item.id)}')">⏰ Snooze</button>
+                        ` : `
+                          <button class="btn-s btn-sm" onclick="window._archiveComm('${esc(item.id)}')">Archive</button>
+                        `}
+                      </div>
+                    </div>`;
+                }).join('')}
           `}
         </div>
       </div>
@@ -1119,6 +1170,7 @@ async function renderComms() {
   // Action handlers
   window._filterComms = (filter) => { commsFilter = filter; load(); };
   window._filterChannel = (channelId) => { commsChannelFilter = commsChannelFilter === channelId ? null : channelId; load(); };
+  window._sortComms = (sort) => { commsSort = sort; load(); };
   
   window._draftReply = async (id) => {
     try {

@@ -196,21 +196,42 @@ else
   ok ".env already exists"
 fi
 
-# 2f. Seed database
+# 2f. Seed database (two-phase: Python schema+config, then Node demo data)
 echo "  Creating + seeding database..."
+
+# Phase 1: Python — schema, migrations, members, config, calendars, custody
 if [ -f "$PIB_REPO/scripts/seed_data.py" ]; then
-  PIB_DB_PATH="$PIB_DB" python "$PIB_REPO/scripts/seed_data.py" "$PIB_DB" 2>&1 | tail -5
+  PIB_DB_PATH="$PIB_DB" python "$PIB_REPO/scripts/seed_data.py" "$PIB_DB" 2>&1 | tail -10
+  if [ ! -f "$PIB_DB" ]; then
+    fail "seed_data.py ran but no database file created at $PIB_DB"
+  fi
   chmod 600 "$PIB_DB" 2>/dev/null || true
-  ok "Database: $PIB_DB"
-  
-  # Quick integrity check
-  TABLES=$(sqlite3 "$PIB_DB" "SELECT COUNT(*) FROM sqlite_master WHERE type='table';" 2>/dev/null || echo "?")
-  MEMBERS=$(sqlite3 "$PIB_DB" "SELECT COUNT(*) FROM common_members WHERE active=1;" 2>/dev/null || echo "?")
-  ok "  $TABLES tables, $MEMBERS active members"
+  ok "Phase 1 (Python): schema + config seeded"
 else
-  warn "seed_data.py not found — running bootstrap.sh instead"
+  warn "seed_data.py not found — trying bootstrap.sh --dev"
   cd "$PIB_REPO" && bash scripts/bootstrap.sh --dev --noninteractive 2>&1 | tail -10
 fi
+
+# Verify migrations applied
+TABLES=$(sqlite3 "$PIB_DB" "SELECT COUNT(*) FROM sqlite_master WHERE type='table';" 2>/dev/null || echo "0")
+if [ "$TABLES" -lt 10 ]; then
+  fail "Only $TABLES tables found — migrations may not have applied. Check seed_data.py output above."
+fi
+
+# Phase 2: Node — demo tasks, streaks, energy, scoreboard, lists, calendar events
+# This makes the console show real data instead of empty tabs
+if [ -f "$PIB_REPO/console/seed.mjs" ]; then
+  echo "  Seeding demo data (tasks, streaks, scoreboard, lists)..."
+  cd "$PIB_REPO" && node console/seed.mjs "$PIB_DB" 2>&1 | tail -10
+  ok "Phase 2 (Node): demo data seeded"
+else
+  warn "console/seed.mjs not found — console tabs will show empty state"
+fi
+
+# Integrity check
+MEMBERS=$(sqlite3 "$PIB_DB" "SELECT COUNT(*) FROM common_members WHERE active=1;" 2>/dev/null || echo "?")
+TASKS=$(sqlite3 "$PIB_DB" "SELECT COUNT(*) FROM ops_tasks;" 2>/dev/null || echo "0")
+ok "Database: $PIB_DB ($TABLES tables, $MEMBERS members, $TASKS tasks)"
 
 # 2g. Console node_modules
 if [ -d "$PIB_REPO/console" ] && [ -f "$PIB_REPO/console/package.json" ]; then

@@ -423,10 +423,10 @@ async def cmd_upcoming(db, args: dict, agent_id: str) -> dict:
     days = args.get("days", 7)
 
     rows = await db.execute_fetchall(
-        "SELECT * FROM ops_recurring_tasks "
+        "SELECT * FROM ops_recurring "
         "WHERE assignee = ? AND active = 1 "
-        "AND next_due_date <= date('now', ? || ' days') "
-        "ORDER BY next_due_date",
+        "AND next_due <= date('now', ? || ' days') "
+        "ORDER BY next_due",
         [member_id, str(days)],
     )
     tasks = [dict(r) for r in rows] if rows else []
@@ -653,21 +653,30 @@ async def cmd_recurring_done(db, args: dict, agent_id: str) -> dict:
         return {"error": "recurring_id is required"}
 
     row = await db.execute_fetchone(
-        "SELECT * FROM ops_recurring_tasks WHERE id = ?", [recurring_id]
+        "SELECT * FROM ops_recurring WHERE id = ?", [recurring_id]
     )
     if not row:
         return {"error": f"Recurring task {recurring_id} not found"}
 
-    # Update last_completed and advance next_due_date
+    # Mark spawned now and advance next_due based on frequency string.
     await db.execute(
-        "UPDATE ops_recurring_tasks SET last_completed_date = date('now'), "
-        "last_completed_by = ?, completions = completions + 1, "
-        "next_due_date = date('now', '+' || frequency_days || ' days'), "
-        "updated_at = datetime('now') WHERE id = ?",
-        [member_id, recurring_id],
+        "UPDATE ops_recurring SET "
+        "last_spawned = datetime('now'), "
+        "next_due = date('now', '+' || CASE lower(frequency) "
+        "    WHEN 'daily' THEN '1' "
+        "    WHEN 'weekdays' THEN '1' "
+        "    WHEN 'weekly' THEN '7' "
+        "    WHEN 'biweekly' THEN '14' "
+        "    WHEN 'monthly' THEN '30' "
+        "    WHEN 'quarterly' THEN '90' "
+        "    WHEN 'yearly' THEN '365' "
+        "    ELSE '7' "
+        "END || ' days') "
+        "WHERE id = ?",
+        [recurring_id],
     )
     await audit_log(
-        db, "ops_recurring_tasks", "UPDATE", recurring_id, actor=agent_id, source="cli"
+        db, "ops_recurring", "UPDATE", recurring_id, actor=agent_id, source="cli"
     )
     await db.commit()
     return {"recurring_id": recurring_id, "status": "done", "member_id": member_id}
@@ -683,20 +692,29 @@ async def cmd_recurring_skip(db, args: dict, agent_id: str) -> dict:
         return {"error": "recurring_id is required"}
 
     row = await db.execute_fetchone(
-        "SELECT * FROM ops_recurring_tasks WHERE id = ?", [recurring_id]
+        "SELECT * FROM ops_recurring WHERE id = ?", [recurring_id]
     )
     if not row:
         return {"error": f"Recurring task {recurring_id} not found"}
 
-    # Advance next_due_date without counting as completion
+    # Advance next_due without marking as spawned (skip).
     await db.execute(
-        "UPDATE ops_recurring_tasks SET "
-        "next_due_date = date('now', '+' || frequency_days || ' days'), "
-        "skips = skips + 1, updated_at = datetime('now') WHERE id = ?",
+        "UPDATE ops_recurring SET "
+        "next_due = date('now', '+' || CASE lower(frequency) "
+        "    WHEN 'daily' THEN '1' "
+        "    WHEN 'weekdays' THEN '1' "
+        "    WHEN 'weekly' THEN '7' "
+        "    WHEN 'biweekly' THEN '14' "
+        "    WHEN 'monthly' THEN '30' "
+        "    WHEN 'quarterly' THEN '90' "
+        "    WHEN 'yearly' THEN '365' "
+        "    ELSE '7' "
+        "END || ' days') "
+        "WHERE id = ?",
         [recurring_id],
     )
     await audit_log(
-        db, "ops_recurring_tasks", "UPDATE", recurring_id, actor=agent_id,
+        db, "ops_recurring", "UPDATE", recurring_id, actor=agent_id,
         new_values=json.dumps({"skipped": True, "reason": reason}),
         source="cli",
     )

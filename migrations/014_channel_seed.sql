@@ -3,6 +3,13 @@
 -- Family household default channels, devices, and accounts
 -- ═══════════════════════════════════════════════════════════════
 
+-- ─── Household Parents (FK parents for the device/account/channel rows below) ─
+-- Minimal stub rows so the FK references below resolve on a fresh bootstrap.
+-- Full member metadata is filled in post-bootstrap by scripts/seed_data.py.
+INSERT OR IGNORE INTO common_members (id, display_name, role) VALUES
+    ('m-james', 'James', 'parent'),
+    ('m-laura', 'Laura', 'parent');
+
 -- ─── Devices ──────────────────────────────────────────────────
 
 INSERT INTO comms_devices (id, display_name, device_type, status, location, owner_member_id) VALUES

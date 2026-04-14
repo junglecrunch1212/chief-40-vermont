@@ -1115,12 +1115,19 @@ app.post("/api/lists/:listName/items/:id/toggle", requireMember, guardedWrite("l
 }));
 
 app.post("/api/chat/send", requireMember, rateLimitMiddleware("web_chat"), (req, res) => {
+  // NOTE: this is currently a capture-creation stub. A real streaming chat
+  // loop lives behind GET /api/chat/stream but has no CLI handler yet.
+  // Clients send `text` per the API contract; accept `message` for back-compat.
+  const messageText = req.body.text ?? req.body.message;
+  if (typeof messageText !== "string" || !messageText.trim()) {
+    return res.status(400).json({ error: "text is required" });
+  }
   const childMode = req.body.child_mode === true || req.memberRole === 'child';
   const childPrompt = childMode
     ? "You are talking to a child (age 6). Keep responses simple, age-appropriate, fun. Never discuss finances, medical details, custody, ADHD, medications, or adult scheduling.\n\n"
     : "";
   const result = runCLI("capture", {
-    text: childPrompt + req.body.message,
+    text: childPrompt + messageText,
     source: "webchat",
   }, req.memberId);
   res.json(result);
@@ -1624,11 +1631,12 @@ app.get("/api/comms/inbox", requireMember, (req, res) => {
   const batchWindow = req.query.batch_window || null;
   const outcome = req.query.outcome || req.query.status || null; // support both params
   try {
+    // Include household-scope messages (member_id IS NULL) in every member's inbox
     let sql = `
       SELECT oc.*, cc.display_name as channel_name, cc.icon as channel_icon
       FROM ops_comms oc
       LEFT JOIN comms_channels cc ON cc.id = oc.channel
-      WHERE oc.member_id = ?
+      WHERE (oc.member_id = ? OR oc.member_id IS NULL)
     `;
     const params = [req.memberId];
 

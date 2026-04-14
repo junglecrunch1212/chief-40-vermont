@@ -222,10 +222,14 @@ PIB_CONFIG = [
 
 
 async def seed(db_path: str = "pib.db"):
-    """Seed a database with all household configuration."""
+    """Seed a database with all household configuration.
+
+    Assumes the database has already been bootstrapped via
+    `python -m pib.cli bootstrap <db_path>`. Do NOT re-apply schema or
+    migrations here — that creates duplicate-index errors on an already-
+    bootstrapped DB.
+    """
     conn = await get_connection(db_path)
-    await apply_schema(conn)
-    await apply_migrations(conn)
 
     # Members
     for m in MEMBERS:
@@ -314,14 +318,14 @@ async def seed(db_path: str = "pib.db"):
         ("ch-gmail-james", "Gmail (James)", "📧", "conversational", "email", 1, 1),
         ("ch-imessage-james", "iMessage (James)", "💬", "conversational", "imessage", 1, 2),
         ("ch-sms-james", "SMS (James)", "📱", "conversational", "sms", 1, 3),
-        ("ch-voice-james", "Voicemail (James)", "🎙️", "async", "voice", 1, 4),
+        ("ch-voice-james", "Voicemail (James)", "🎙️", "conversational", "voice", 1, 4),
         ("ch-outlook-laura", "Outlook (Laura Work)", "📨", "conversational", "email", 1, 5),
         ("ch-imessage-laura", "iMessage (Laura)", "💬", "conversational", "imessage", 1, 6),
         ("ch-whatsapp-family", "WhatsApp Family", "📲", "conversational", "whatsapp", 1, 7),
     ]
     for ch in channels:
         await conn.execute(
-            "INSERT OR IGNORE INTO comms_channels (id, display_name, icon, category, adapter_type, enabled, sort_order) "
+            "INSERT OR IGNORE INTO comms_channels (id, display_name, icon, category, adapter_id, enabled, sort_order) "
             "VALUES (?,?,?,?,?,?,?)", ch,
         )
 
@@ -361,45 +365,57 @@ async def seed(db_path: str = "pib.db"):
         )
 
     # ── Accounts (4) ──
+    # comms_accounts columns (see migrations/012_channel_registry.sql):
+    #   id, account_type (email|phone|social|api|webhook), address, owner_member_id, provider
     accounts = [
-        ("acc-gmail-james", "m-james", "gmail", "james@example.com"),
-        ("acc-apple-james", "m-james", "apple_id", "james@example.com"),
-        ("acc-apple-laura", "m-laura", "apple_id", "laura@example.com"),
-        ("acc-outlook-laura", "m-laura", "outlook", "laura@work-domain.com"),
+        ("acc-gmail-james",   "email", "james@example.com",         "m-james", "gmail"),
+        ("acc-apple-james",   "email", "james@example.com",         "m-james", "apple_id"),
+        ("acc-apple-laura",   "email", "laura@example.com",         "m-laura", "apple_id"),
+        ("acc-outlook-laura", "email", "laura@work-domain.com",     "m-laura", "outlook"),
     ]
     for a in accounts:
         await conn.execute(
-            "INSERT OR IGNORE INTO comms_accounts (id, member_id, account_type, account_identifier) VALUES (?,?,?,?)", a,
+            "INSERT OR IGNORE INTO comms_accounts "
+            "(id, account_type, address, owner_member_id, provider) VALUES (?,?,?,?,?)",
+            a,
         )
 
     # ── Budget (8 categories) ──
+    # fin_budget_config schema: (category PRIMARY KEY, monthly_target, is_fixed,
+    # is_discretionary, alert_threshold, notes)
     budgets = [
-        ("bud-groceries", "Groceries", 800, "🛒"),
-        ("bud-dining", "Dining Out", 300, "🍽️"),
-        ("bud-housing", "Housing", 3200, "🏠"),
-        ("bud-transport", "Transportation", 400, "🚗"),
-        ("bud-health", "Healthcare", 200, "🏥"),
-        ("bud-baby", "Baby Prep", 500, "👶"),
-        ("bud-household", "Household", 300, "🧹"),
-        ("bud-entertainment", "Entertainment", 150, "🎬"),
+        ("Groceries",     800),
+        ("Dining Out",    300),
+        ("Housing",      3200),
+        ("Transportation",400),
+        ("Healthcare",    200),
+        ("Baby Prep",     500),
+        ("Household",     300),
+        ("Entertainment", 150),
     ]
-    for b in budgets:
+    for category, target in budgets:
         await conn.execute(
-            "INSERT OR IGNORE INTO fin_budget_config (id, category, monthly_target, icon) VALUES (?,?,?,?)", b,
+            "INSERT OR IGNORE INTO fin_budget_config (category, monthly_target) VALUES (?,?)",
+            [category, target],
         )
 
     # ── Recurring tasks (6) ──
+    # ops_recurring required NOT NULL columns: id, title, type, frequency,
+    # assignee, domain, next_due, micro_script_template
     recurring = [
-        ("rec-morning-meds", "Morning medication", "daily", "m-james", "health", "07:30"),
-        ("rec-captain-am", "Captain walk (AM)", "daily", "m-james", "household", "09:00"),
-        ("rec-captain-pm", "Captain walk (PM)", "daily", "m-james", "household", "16:00"),
-        ("rec-meal-plan", "Meal planning", "weekly", "m-james", "household", None),
-        ("rec-heartworm", "Captain heartworm medication", "monthly", "m-james", "household", None),
-        ("rec-hvac-filter", "HVAC filter change", "monthly", "m-james", "household", None),
+        ("rec-morning-meds",  "Morning medication",         "chore", "daily",   "m-james", "health",    ""),
+        ("rec-captain-am",    "Captain walk (AM)",          "chore", "daily",   "m-james", "household", ""),
+        ("rec-captain-pm",    "Captain walk (PM)",          "chore", "daily",   "m-james", "household", ""),
+        ("rec-meal-plan",     "Meal planning",              "task",  "weekly",  "m-james", "household", ""),
+        ("rec-heartworm",     "Captain heartworm medication","chore","monthly", "m-james", "household", ""),
+        ("rec-hvac-filter",   "HVAC filter change",         "task",  "monthly", "m-james", "household", ""),
     ]
     for r in recurring:
         await conn.execute(
-            "INSERT OR IGNORE INTO ops_recurring (id, title, frequency, assignee, domain, preferred_time) VALUES (?,?,?,?,?,?)", r,
+            "INSERT OR IGNORE INTO ops_recurring "
+            "(id, title, type, frequency, assignee, domain, micro_script_template, next_due) "
+            "VALUES (?,?,?,?,?,?,?, date('now'))",
+            r,
         )
 
     # ── Batch windows config ──

@@ -51,7 +51,8 @@ Env vars:
 
 const DB_PATH = process.env.PIB_DB_PATH || "/opt/pib/data/pib.db";
 const PIB_HOME = process.env.PIB_HOME || "/opt/pib";
-const CALLER = process.env.PIB_CALLER_AGENT || "openclaw";
+// "openclaw" is not in the agent allowlist; default to "dev" for unattended health runs.
+const CALLER = process.env.PIB_CALLER_AGENT || "dev";
 const jsonOut = args.json;
 const BACKUP_DIR = join(PIB_HOME, "data", "backups");
 

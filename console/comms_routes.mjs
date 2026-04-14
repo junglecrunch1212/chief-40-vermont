@@ -274,8 +274,8 @@ export function createCommsRouter(getDB, auditLog, guardedWrite) {
       params.push(req.params.id);
 
       wdb.prepare(`
-        UPDATE ops_comms 
-        SET ${updateFields.join(', ')}, updated_at = datetime('now')
+        UPDATE ops_comms
+        SET ${updateFields.join(', ')}
         WHERE id = ?
       `).run(...params);
 
@@ -294,8 +294,8 @@ export function createCommsRouter(getDB, auditLog, guardedWrite) {
 
     try {
       wdb.prepare(`
-        UPDATE ops_comms 
-        SET draft_status = 'rejected', updated_at = datetime('now')
+        UPDATE ops_comms
+        SET draft_status = 'rejected'
         WHERE id = ?
       `).run(req.params.id);
 
@@ -314,11 +314,10 @@ export function createCommsRouter(getDB, auditLog, guardedWrite) {
 
     try {
       wdb.prepare(`
-        UPDATE ops_comms 
-        SET draft_status = 'approved', 
-            outcome = 'sent', 
-            responded_at = datetime('now'),
-            updated_at = datetime('now')
+        UPDATE ops_comms
+        SET draft_status = 'approved',
+            outcome = 'sent',
+            responded_at = datetime('now')
         WHERE id = ?
       `).run(req.params.id);
 
@@ -344,8 +343,8 @@ export function createCommsRouter(getDB, auditLog, guardedWrite) {
 
     try {
       wdb.prepare(`
-        UPDATE ops_comms 
-        SET snoozed_until = ?, updated_at = datetime('now')
+        UPDATE ops_comms
+        SET snoozed_until = ?
         WHERE id = ?
       `).run(until, req.params.id);
 
@@ -364,11 +363,10 @@ export function createCommsRouter(getDB, auditLog, guardedWrite) {
 
     try {
       wdb.prepare(`
-        UPDATE ops_comms 
-        SET needs_response = 0, 
-            outcome = 'handled', 
-            responded_at = datetime('now'),
-            updated_at = datetime('now')
+        UPDATE ops_comms
+        SET needs_response = 0,
+            outcome = 'handled',
+            responded_at = datetime('now')
         WHERE id = ?
       `).run(req.params.id);
 

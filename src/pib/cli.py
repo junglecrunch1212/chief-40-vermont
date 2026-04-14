@@ -313,7 +313,10 @@ async def cmd_calendar_query(db, args: dict, agent_id: str) -> dict:
     params: list[Any] = [query_date]
 
     if member_id:
-        conditions.append("member_id = ?")
+        # cal_classified_events stores attendees as JSON array in for_member_ids
+        conditions.append(
+            "EXISTS (SELECT 1 FROM json_each(for_member_ids) WHERE value = ?)"
+        )
         params.append(member_id)
 
     # Privacy fence: non-dev agents only see busy status for Laura's work calendar
@@ -945,7 +948,7 @@ async def cmd_member_settings_set(db, args: dict, agent_id: str) -> dict:
         [member_id, key, str(value), description, agent_id],
     )
     await audit_log(
-        db, "pib_member_settings", "UPSERT", f"{member_id}:{key}",
+        db, "pib_member_settings", "UPDATE", f"{member_id}:{key}",
         actor=agent_id, new_values=json.dumps({"key": key, "value": value}),
         source="cli",
     )

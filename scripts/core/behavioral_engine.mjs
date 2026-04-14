@@ -28,7 +28,7 @@ const REWARD_SCHEDULE = [
     "You're in a groove.",
     "That's {today} today — nice run."
   ]},
-  { prob: 0.10, tier: "celebration", messages: [
+  { prob: 0.10, tier: "delight", messages: [
     "🎉 Crushing it!",
     "Three in a row!",
     "On fire today.",
@@ -36,7 +36,7 @@ const REWARD_SCHEDULE = [
     "Streak preserved. Your future self thanks you.",
     "That task had been sitting there {days_old} days. It's finally free. 🦋"
   ]},
-  { prob: 0.05, tier: "rare", messages: [
+  { prob: 0.05, tier: "jackpot", messages: [
     "🏆 LEGENDARY. You just mass-cleared.",
     "Hall of fame move.",
     "🎰 Holy smokes — {today} tasks in one session. Personal record.",

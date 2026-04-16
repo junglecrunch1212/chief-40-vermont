@@ -211,7 +211,7 @@ async def complete_task_with_reward(db, task_id: str, member_id: str, actor: str
     member_row = await db.execute_fetchone(
         "SELECT age FROM common_members WHERE id = ?", [member_id]
     )
-    member_age = member_row["age"] if member_row and member_row.get("age") is not None else None
+    member_age = member_row["age"] if member_row and member_row["age"] is not None else None
     tier, message = select_reward(member_id, task, stats, member_age=member_age)
 
     # 5. Log reward

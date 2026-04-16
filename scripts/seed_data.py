@@ -314,14 +314,14 @@ async def seed(db_path: str = "pib.db"):
         ("ch-gmail-james", "Gmail (James)", "📧", "conversational", "email", 1, 1),
         ("ch-imessage-james", "iMessage (James)", "💬", "conversational", "imessage", 1, 2),
         ("ch-sms-james", "SMS (James)", "📱", "conversational", "sms", 1, 3),
-        ("ch-voice-james", "Voicemail (James)", "🎙️", "async", "voice", 1, 4),
+        ("ch-voice-james", "Voicemail (James)", "🎙️", "conversational", "voice", 1, 4),
         ("ch-outlook-laura", "Outlook (Laura Work)", "📨", "conversational", "email", 1, 5),
         ("ch-imessage-laura", "iMessage (Laura)", "💬", "conversational", "imessage", 1, 6),
         ("ch-whatsapp-family", "WhatsApp Family", "📲", "conversational", "whatsapp", 1, 7),
     ]
     for ch in channels:
         await conn.execute(
-            "INSERT OR IGNORE INTO comms_channels (id, display_name, icon, category, adapter_type, enabled, sort_order) "
+            "INSERT OR IGNORE INTO comms_channels (id, display_name, icon, category, adapter_id, enabled, sort_order) "
             "VALUES (?,?,?,?,?,?,?)", ch,
         )
 
@@ -362,44 +362,44 @@ async def seed(db_path: str = "pib.db"):
 
     # ── Accounts (4) ──
     accounts = [
-        ("acc-gmail-james", "m-james", "gmail", "james@example.com"),
-        ("acc-apple-james", "m-james", "apple_id", "james@example.com"),
-        ("acc-apple-laura", "m-laura", "apple_id", "laura@example.com"),
-        ("acc-outlook-laura", "m-laura", "outlook", "laura@work-domain.com"),
+        ("acc-gmail-james", "email", "james@example.com", "James Gmail", "m-james"),
+        ("acc-apple-james", "email", "james@icloud.com", "James iCloud", "m-james"),
+        ("acc-apple-laura", "email", "laura@icloud.com", "Laura iCloud", "m-laura"),
+        ("acc-outlook-laura", "email", "laura@work-domain.com", "Laura Work", "m-laura"),
     ]
     for a in accounts:
         await conn.execute(
-            "INSERT OR IGNORE INTO comms_accounts (id, member_id, account_type, account_identifier) VALUES (?,?,?,?)", a,
+            "INSERT OR IGNORE INTO comms_accounts (id, account_type, address, display_name, owner_member_id) VALUES (?,?,?,?,?)", a,
         )
 
     # ── Budget (8 categories) ──
     budgets = [
-        ("bud-groceries", "Groceries", 800, "🛒"),
-        ("bud-dining", "Dining Out", 300, "🍽️"),
-        ("bud-housing", "Housing", 3200, "🏠"),
-        ("bud-transport", "Transportation", 400, "🚗"),
-        ("bud-health", "Healthcare", 200, "🏥"),
-        ("bud-baby", "Baby Prep", 500, "👶"),
-        ("bud-household", "Household", 300, "🧹"),
-        ("bud-entertainment", "Entertainment", 150, "🎬"),
+        ("Groceries", 800),
+        ("Dining Out", 300),
+        ("Housing", 3200),
+        ("Transportation", 400),
+        ("Healthcare", 200),
+        ("Baby Prep", 500),
+        ("Household", 300),
+        ("Entertainment", 150),
     ]
     for b in budgets:
         await conn.execute(
-            "INSERT OR IGNORE INTO fin_budget_config (id, category, monthly_target, icon) VALUES (?,?,?,?)", b,
+            "INSERT OR IGNORE INTO fin_budget_config (category, monthly_target) VALUES (?,?)", b,
         )
 
     # ── Recurring tasks (6) ──
     recurring = [
-        ("rec-morning-meds", "Morning medication", "daily", "m-james", "health", "07:30"),
-        ("rec-captain-am", "Captain walk (AM)", "daily", "m-james", "household", "09:00"),
-        ("rec-captain-pm", "Captain walk (PM)", "daily", "m-james", "household", "16:00"),
-        ("rec-meal-plan", "Meal planning", "weekly", "m-james", "household", None),
-        ("rec-heartworm", "Captain heartworm medication", "monthly", "m-james", "household", None),
-        ("rec-hvac-filter", "HVAC filter change", "monthly", "m-james", "household", None),
+        ("rec-morning-meds", "Morning medication", "task", "daily", "m-james", "health", "2026-04-17"),
+        ("rec-captain-am", "Captain walk (AM)", "task", "daily", "m-james", "household", "2026-04-17"),
+        ("rec-captain-pm", "Captain walk (PM)", "task", "daily", "m-james", "household", "2026-04-17"),
+        ("rec-meal-plan", "Meal planning", "task", "weekly", "m-james", "household", "2026-04-19"),
+        ("rec-heartworm", "Captain heartworm medication", "task", "monthly", "m-james", "household", "2026-05-01"),
+        ("rec-hvac-filter", "HVAC filter change", "task", "monthly", "m-james", "household", "2026-05-01"),
     ]
     for r in recurring:
         await conn.execute(
-            "INSERT OR IGNORE INTO ops_recurring (id, title, frequency, assignee, domain, preferred_time) VALUES (?,?,?,?,?,?)", r,
+            "INSERT OR IGNORE INTO ops_recurring (id, title, type, frequency, assignee, domain, next_due) VALUES (?,?,?,?,?,?,?)", r,
         )
 
     # ── Batch windows config ──

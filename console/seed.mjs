@@ -116,7 +116,7 @@ function seedData(db) {
   console.log("  Members...");
   
   db.prepare(`
-    INSERT INTO common_members (
+    INSERT OR REPLACE INTO common_members (
       id, display_name, role, is_household_member, is_adult, 
       can_be_assigned_tasks, can_receive_messages,
       phone, email, imessage_handle, preferred_channel,
@@ -133,7 +133,7 @@ function seedData(db) {
   );
   
   db.prepare(`
-    INSERT INTO common_members (
+    INSERT OR REPLACE INTO common_members (
       id, display_name, role, is_household_member, is_adult, 
       can_be_assigned_tasks, can_receive_messages,
       phone, email, imessage_handle, preferred_channel,
@@ -146,7 +146,7 @@ function seedData(db) {
   );
   
   db.prepare(`
-    INSERT INTO common_members (
+    INSERT OR REPLACE INTO common_members (
       id, display_name, role, is_household_member, is_adult, 
       can_be_assigned_tasks, can_receive_messages,
       age, school, view_mode, active
@@ -157,7 +157,7 @@ function seedData(db) {
   );
   
   db.prepare(`
-    INSERT INTO common_members (
+    INSERT OR REPLACE INTO common_members (
       id, display_name, role, is_household_member, is_adult, 
       can_be_assigned_tasks, can_receive_messages,
       expected_arrival, view_mode, active
@@ -252,7 +252,7 @@ function seedData(db) {
   ];
   
   const insertTask = db.prepare(`
-    INSERT INTO ops_tasks (
+    INSERT OR REPLACE INTO ops_tasks (
       id, title, status, assignee, domain, item_type, due_date, scheduled_date,
       energy, effort, micro_script, waiting_on, points, notes, completed_at, completed_by,
       project_step_ref
@@ -305,7 +305,7 @@ function seedData(db) {
   ];
   
   const insertRecurring = db.prepare(`
-    INSERT INTO ops_recurring (
+    INSERT OR REPLACE INTO ops_recurring (
       id, title, type, frequency, days, assignee, for_member, domain,
       next_due, lead_days, effort, energy, micro_script_template, points, active
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -323,21 +323,21 @@ function seedData(db) {
   console.log("  Streaks...");
   
   db.prepare(`
-    INSERT INTO ops_streaks (
+    INSERT OR REPLACE INTO ops_streaks (
       member_id, streak_type, current_streak, best_streak, last_completion_date,
       grace_days_used, max_grace_days, custody_pause_enabled
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `).run('m-james', 'daily_completion', 12, 18, yesterday(), 0, 1, 0);
   
   db.prepare(`
-    INSERT INTO ops_streaks (
+    INSERT OR REPLACE INTO ops_streaks (
       member_id, streak_type, current_streak, best_streak, last_completion_date,
       grace_days_used, max_grace_days, custody_pause_enabled
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `).run('m-laura', 'daily_completion', 8, 14, yesterday(), 1, 1, 0);
   
   db.prepare(`
-    INSERT INTO ops_streaks (
+    INSERT OR REPLACE INTO ops_streaks (
       member_id, streak_type, current_streak, best_streak, last_completion_date,
       grace_days_used, max_grace_days, custody_pause_enabled
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -347,14 +347,14 @@ function seedData(db) {
   console.log("  Energy states...");
   
   db.prepare(`
-    INSERT INTO pib_energy_states (
+    INSERT OR REPLACE INTO pib_energy_states (
       member_id, state_date, meds_taken, meds_taken_at,
       sleep_quality, completions_today, energy_level
     ) VALUES (?, ?, ?, ?, ?, ?, ?)
   `).run('m-james', today(), 1, '07:32', 'great', 2, 'high');
   
   db.prepare(`
-    INSERT INTO pib_energy_states (
+    INSERT OR REPLACE INTO pib_energy_states (
       member_id, state_date, meds_taken, meds_taken_at,
       sleep_quality, completions_today, energy_level
     ) VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -399,7 +399,7 @@ function seedData(db) {
   ];
   
   const insertEvent = db.prepare(`
-    INSERT INTO cal_classified_events (
+    INSERT OR REPLACE INTO cal_classified_events (
       id, event_date, start_time, end_time, all_day, title, title_redacted,
       event_type, category, for_member_ids, scheduling_impact, privacy,
       prep_minutes, travel_minutes_to
@@ -435,7 +435,7 @@ function seedData(db) {
   ];
   
   const insertList = db.prepare(`
-    INSERT INTO ops_lists (list_name, item_text, quantity, unit, category, checked, added_by)
+    INSERT OR REPLACE INTO ops_lists (list_name, item_text, quantity, unit, category, checked, added_by)
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
   
@@ -450,7 +450,7 @@ function seedData(db) {
   console.log("  Life phases...");
   
   db.prepare(`
-    INSERT INTO common_life_phases (id, name, status, start_date, end_date, description, overrides)
+    INSERT OR REPLACE INTO common_life_phases (id, name, status, start_date, end_date, description, overrides)
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `).run(
     'phase-prep', 'Pre-Baby Prep', 'active', '2026-02-01', '2026-05-15',
@@ -459,7 +459,7 @@ function seedData(db) {
   );
   
   db.prepare(`
-    INSERT INTO common_life_phases (id, name, status, start_date, end_date, description, overrides)
+    INSERT OR REPLACE INTO common_life_phases (id, name, status, start_date, end_date, description, overrides)
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `).run(
     'phase-newborn', 'Newborn Survival', 'pending', '2026-05-15', '2026-08-15',
@@ -480,7 +480,7 @@ function seedData(db) {
   ];
   
   const insertProtocol = db.prepare(`
-    INSERT INTO pib_coach_protocols (id, name, trigger_condition, behavior, active)
+    INSERT OR REPLACE INTO pib_coach_protocols (id, name, trigger_condition, behavior, active)
     VALUES (?, ?, ?, ?, ?)
   `);
   
@@ -499,7 +499,7 @@ function seedData(db) {
   ];
   
   const insertBudget = db.prepare(`
-    INSERT INTO fin_budget_config (category, monthly_target, is_fixed, is_discretionary, alert_threshold)
+    INSERT OR REPLACE INTO fin_budget_config (category, monthly_target, is_fixed, is_discretionary, alert_threshold)
     VALUES (?, ?, ?, ?, ?)
   `);
   
@@ -511,17 +511,17 @@ function seedData(db) {
   const firstOfMonth = today().slice(0, 8) + '01';
   
   db.prepare(`
-    INSERT INTO fin_transactions (transaction_date, merchant_raw, merchant_normalized, amount, category, account)
+    INSERT OR REPLACE INTO fin_transactions (transaction_date, merchant_raw, merchant_normalized, amount, category, account)
     VALUES (?, ?, ?, ?, ?, ?)
   `).run(today(), 'PUBLIX #1234', 'Publix', -127.45, 'Groceries', 'Chase Checking');
   
   db.prepare(`
-    INSERT INTO fin_transactions (transaction_date, merchant_raw, merchant_normalized, amount, category, account)
+    INSERT OR REPLACE INTO fin_transactions (transaction_date, merchant_raw, merchant_normalized, amount, category, account)
     VALUES (?, ?, ?, ?, ?, ?)
   `).run(yesterday(), 'CHIPOTLE', 'Chipotle', -28.50, 'Dining', 'Chase Checking');
   
   db.prepare(`
-    INSERT INTO fin_transactions (transaction_date, merchant_raw, merchant_normalized, amount, category, account)
+    INSERT OR REPLACE INTO fin_transactions (transaction_date, merchant_raw, merchant_normalized, amount, category, account)
     VALUES (?, ?, ?, ?, ?, ?)
   `).run(lastWeek(), 'SHELL GAS', 'Shell', -52.00, 'Gas', 'Chase Checking');
   
@@ -529,7 +529,7 @@ function seedData(db) {
   console.log("  Custody configuration...");
   
   db.prepare(`
-    INSERT INTO common_custody_configs (
+    INSERT OR REPLACE INTO common_custody_configs (
       child_id, schedule_type, anchor_date, anchor_parent, other_parent,
       transition_day, transition_time, midweek_visit_enabled, active, effective_from
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -540,7 +540,7 @@ function seedData(db) {
   
   // Add coparent Mike
   db.prepare(`
-    INSERT INTO common_members (
+    INSERT OR REPLACE INTO common_members (
       id, display_name, role, is_household_member, is_adult,
       can_be_assigned_tasks, can_receive_messages, phone, active
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -550,17 +550,17 @@ function seedData(db) {
   console.log("  Runtime config...");
   
   db.prepare(`
-    INSERT INTO pib_config (key, value, description)
+    INSERT OR REPLACE INTO pib_config (key, value, description)
     VALUES (?, ?, ?)
   `).run('anthropic_model_sonnet', 'claude-sonnet-4-5-20250929', 'Routine queries');
   
   db.prepare(`
-    INSERT INTO pib_config (key, value, description)
+    INSERT OR REPLACE INTO pib_config (key, value, description)
     VALUES (?, ?, ?)
   `).run('anthropic_model_opus', 'claude-opus-4-6', 'Complex queries');
   
   db.prepare(`
-    INSERT INTO pib_config (key, value, description)
+    INSERT OR REPLACE INTO pib_config (key, value, description)
     VALUES (?, ?, ?)
   `).run('household_timezone', 'America/New_York', 'Atlanta');
   
@@ -577,7 +577,7 @@ function seedData(db) {
   ];
   
   const insertDevice = db.prepare(`
-    INSERT INTO comms_devices (id, display_name, device_type, status, owner_member_id, location, config_json, active)
+    INSERT OR REPLACE INTO comms_devices (id, display_name, device_type, status, owner_member_id, location, config_json, active)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `);
   
@@ -600,7 +600,7 @@ function seedData(db) {
   ];
   
   const insertAccount = db.prepare(`
-    INSERT INTO comms_accounts (id, account_type, address, display_name, owner_member_id, provider, auth_status, capabilities_json, config_json, active)
+    INSERT OR REPLACE INTO comms_accounts (id, account_type, address, display_name, owner_member_id, provider, auth_status, capabilities_json, config_json, active)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   
@@ -635,7 +635,7 @@ function seedData(db) {
   ];
   
   const insertChannel = db.prepare(`
-    INSERT INTO comms_channels (id, display_name, icon, category, adapter_id, enabled, setup_complete,
+    INSERT OR REPLACE INTO comms_channels (id, display_name, icon, category, adapter_id, enabled, setup_complete,
       privacy_level, content_storage, outbound_requires_approval, config_json, sort_order)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
@@ -650,7 +650,7 @@ function seedData(db) {
   
   for (const ch of channelsData) {
     db.prepare(`
-      INSERT INTO comms_channel_health (channel_id, status, consecutive_failures, last_poll_at, last_successful_at)
+      INSERT OR REPLACE INTO comms_channel_health (channel_id, status, consecutive_failures, last_poll_at, last_successful_at)
       VALUES (?, ?, ?, ?, ?)
     `).run(ch.id, ch.enabled ? 'active' : 'inactive', 0, isoNow(), isoNow());
   }
@@ -671,7 +671,7 @@ function seedData(db) {
   ];
   
   const insertAccess = db.prepare(`
-    INSERT INTO comms_channel_member_access (id, member_id, channel_id, access_level, can_approve_drafts, batch_window,
+    INSERT OR REPLACE INTO comms_channel_member_access (id, member_id, channel_id, access_level, can_approve_drafts, batch_window,
       show_in_inbox, receives_proactive, digest_include, notify_on_urgent)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
@@ -720,7 +720,7 @@ function seedData(db) {
   ];
   
   const insertComm = db.prepare(`
-    INSERT INTO ops_comms (id, date, channel, direction, from_addr, to_addr, member_id, item_ref, task_ref,
+    INSERT OR REPLACE INTO ops_comms (id, date, channel, direction, from_addr, to_addr, member_id, item_ref, task_ref,
       thread_id, subject, summary, body_snippet, needs_response, response_urgency, batch_window, batch_date,
       extraction_status, extracted_items, draft_response, draft_status, snoozed_until, outcome)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -752,7 +752,7 @@ function seedData(db) {
   ];
   
   const insertNotebook = db.prepare(`
-    INSERT INTO cap_notebooks (id, member_id, name, slug, icon, is_system)
+    INSERT OR REPLACE INTO cap_notebooks (id, member_id, name, slug, icon, is_system)
     VALUES (?, ?, ?, ?, ?, ?)
   `);
   
@@ -860,7 +860,7 @@ function seedData(db) {
   ];
   
   const insertCapture = db.prepare(`
-    INSERT INTO cap_captures (
+    INSERT OR REPLACE INTO cap_captures (
       id, member_id, raw_text, title, body, capture_type, source, notebook,
       triage_status, tags, pinned, archived, archived_at, recipe_data, created_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)

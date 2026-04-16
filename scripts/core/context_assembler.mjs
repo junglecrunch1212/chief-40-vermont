@@ -69,7 +69,8 @@ try {
 
   const payload = JSON.stringify({ message: args.message || "" });
 
-  const raw = execFileSync("python", ["-m", "pib.cli", "context", DB_PATH, "--json", payload, "--member", args.member], {
+  const PYTHON = process.env.PIB_PYTHON || "python3";
+  const raw = execFileSync(PYTHON, ["-m", "pib.cli", "context", DB_PATH, "--json", payload, "--member", args.member], {
     encoding: "utf-8",
     timeout: 30_000,
     env: { ...process.env, PIB_CALLER_AGENT: CALLER },

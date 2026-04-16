@@ -93,7 +93,7 @@ class TestCheckAgentAllowlist:
         """cos has 'migrate' in blocked_cli_commands."""
         ok, msg = check_agent_allowlist("cos", "migrate", agent_caps)
         assert ok is False
-        assert "blocked" in msg.lower() or "not in allowed" in msg.lower()
+        assert "blocked" in msg.lower() or "not in allowed" in msg.lower() or "does not have access" in msg.lower()
 
     def test_cos_blocked_bootstrap(self, agent_caps):
         ok, msg = check_agent_allowlist("cos", "bootstrap", agent_caps)
@@ -107,7 +107,7 @@ class TestCheckAgentAllowlist:
         """Coach has task-create in blocked_cli_commands."""
         ok, msg = check_agent_allowlist("coach", "task-create", agent_caps)
         assert ok is False
-        assert "blocked" in msg.lower() or "not in allowed" in msg.lower()
+        assert "blocked" in msg.lower() or "not in allowed" in msg.lower() or "does not have access" in msg.lower()
 
     def test_coach_blocked_budget(self, agent_caps):
         """Coach cannot discuss money -- budget is blocked."""

@@ -86,7 +86,8 @@ if (existsSync(DB_PATH)) {
 }
 
 // 2. PIB CLI health
-const healthRaw = tryExec("python", ["-m", "pib.cli", "health", DB_PATH, "--json"]);
+const PYTHON_CMD = process.env.PIB_PYTHON || "python3";
+const healthRaw = tryExec(PYTHON_CMD, ["-m", "pib.cli", "health", DB_PATH, "--json"]);
 if (healthRaw) {
   try {
     const h = JSON.parse(healthRaw);

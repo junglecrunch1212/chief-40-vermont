@@ -127,16 +127,28 @@ class ChannelRegistry:
                 except json.JSONDecodeError:
                     log.warning(f"Invalid config_json for channel {row['id']}")
             
-            # Extract capabilities from config
+            # Extract capabilities from config (handle both list and dict formats)
             caps_data = config.get("capabilities", {})
-            capabilities = ChannelCapabilities(
-                can_inbound=caps_data.get("can_inbound", True),
-                can_outbound=caps_data.get("can_outbound", True),
-                can_draft=caps_data.get("can_draft", True),
-                can_extract=caps_data.get("can_extract", True),
-                can_voice_corpus=caps_data.get("can_voice_corpus", False),
-                can_auto_handle=caps_data.get("can_auto_handle", False),
-            )
+            if isinstance(caps_data, list):
+                # List format: ["in", "out", "draft", "extract", "voice", "auto"]
+                capabilities = ChannelCapabilities(
+                    can_inbound="in" in caps_data,
+                    can_outbound="out" in caps_data,
+                    can_draft="draft" in caps_data,
+                    can_extract="extract" in caps_data,
+                    can_voice_corpus="voice" in caps_data,
+                    can_auto_handle="auto" in caps_data,
+                )
+            else:
+                # Dict format: {"can_inbound": true, ...}
+                capabilities = ChannelCapabilities(
+                    can_inbound=caps_data.get("can_inbound", True),
+                    can_outbound=caps_data.get("can_outbound", True),
+                    can_draft=caps_data.get("can_draft", True),
+                    can_extract=caps_data.get("can_extract", True),
+                    can_voice_corpus=caps_data.get("can_voice_corpus", False),
+                    can_auto_handle=caps_data.get("can_auto_handle", False),
+                )
             
             # Extract behavior from config
             behavior_data = config.get("behavior", {})

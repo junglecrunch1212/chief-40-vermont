@@ -450,6 +450,16 @@ async def seed(db_path: str = "pib.db"):
     print(f"  Comms batch config: {len(comms_batch_keys)} keys")
 
     await conn.commit()
+
+    # Rebuild FTS5 indexes (INSERT OR IGNORE can leave them inconsistent)
+    for fts_table in ["ops_tasks_fts", "ops_items_fts", "mem_long_term_fts", "cap_captures_fts"]:
+        try:
+            await conn.execute(f"INSERT INTO {fts_table}({fts_table}) VALUES('rebuild')")
+        except Exception:
+            pass  # Table may not exist yet
+    await conn.commit()
+    print("  FTS5 indexes: rebuilt")
+
     print(f"Seeded {db_path} successfully.")
     print(f"  Members: {len(MEMBERS)}")
     print(f"  Calendar sources: {len(CALENDAR_SOURCES)}")

@@ -243,16 +243,20 @@ class TestConsolePrivacyFence:
         # Insert Laura's privileged sensor reading
         await db.execute(
             """INSERT INTO pib_sensor_readings
-               (id, sensor_id, reading_type, member_id, timestamp, value, classification)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            ["sns-test-001", "health", "sleep", "m-laura", "2026-03-04T06:00:00", '{"hours":7}', "privileged"],
+               (sensor_id, reading_type, member_id, timestamp, value, classification,
+                confidence, ttl_minutes, expires_at, idempotency_key)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ["health", "sleep", "m-laura", "2026-03-04T06:00:00", '{"hours":7}', "privileged",
+             "high", 60, "2026-03-04T07:00:00", "test-laura-priv-001"],
         )
         # Insert James's normal sensor reading
         await db.execute(
             """INSERT INTO pib_sensor_readings
-               (id, sensor_id, reading_type, member_id, timestamp, value, classification)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            ["sns-test-002", "health", "sleep", "m-james", "2026-03-04T06:00:00", '{"hours":6}', "normal"],
+               (sensor_id, reading_type, member_id, timestamp, value, classification,
+                confidence, ttl_minutes, expires_at, idempotency_key)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ["health", "sleep", "m-james", "2026-03-04T06:00:00", '{"hours":6}', "normal",
+             "high", 60, "2026-03-04T07:00:00", "test-james-norm-001"],
         )
         await db.commit()
 
@@ -270,7 +274,7 @@ class TestConsolePrivacyFence:
         assert len(laura_rows) == 0
 
         # Cleanup
-        await db.execute("DELETE FROM pib_sensor_readings WHERE id IN ('sns-test-001', 'sns-test-002')")
+        await db.execute("DELETE FROM pib_sensor_readings WHERE idempotency_key IN ('test-laura-priv-001', 'test-james-norm-001')")
         await db.commit()
 
     @pytest.mark.asyncio
@@ -279,9 +283,11 @@ class TestConsolePrivacyFence:
         # Insert Laura's privileged sensor reading
         await db.execute(
             """INSERT INTO pib_sensor_readings
-               (id, sensor_id, reading_type, member_id, timestamp, value, classification)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            ["sns-test-003", "health", "sleep", "m-laura", "2026-03-04T06:00:00", '{"hours":7}', "privileged"],
+               (sensor_id, reading_type, member_id, timestamp, value, classification,
+                confidence, ttl_minutes, expires_at, idempotency_key)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ["health", "sleep", "m-laura", "2026-03-04T06:00:00", '{"hours":7}', "privileged",
+             "high", 60, "2026-03-04T07:00:00", "test-laura-sees-own-001"],
         )
         await db.commit()
 
@@ -289,7 +295,7 @@ class TestConsolePrivacyFence:
         rows = await db.execute_fetchall(
             """SELECT * FROM pib_sensor_readings
                WHERE (classification != 'privileged' OR member_id = ?)
-               AND id = 'sns-test-003'""",
+               AND idempotency_key = 'test-laura-sees-own-001'""",
             ["m-laura"]
         )
 
@@ -298,5 +304,5 @@ class TestConsolePrivacyFence:
         assert rows[0]["classification"] == "privileged"
 
         # Cleanup
-        await db.execute("DELETE FROM pib_sensor_readings WHERE id = 'sns-test-003'")
+        await db.execute("DELETE FROM pib_sensor_readings WHERE idempotency_key = 'test-laura-sees-own-001'")
         await db.commit()

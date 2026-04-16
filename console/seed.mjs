@@ -906,7 +906,13 @@ function main() {
     
     // Seed data
     seedData(db);
-    
+
+    // Rebuild FTS5 indexes (INSERT OR REPLACE can leave them inconsistent)
+    for (const fts of ["ops_tasks_fts", "ops_items_fts", "mem_long_term_fts", "cap_captures_fts", "comms_fts"]) {
+      try { db.exec(`INSERT INTO ${fts}(${fts}) VALUES('rebuild')`); } catch (_) { /* may not exist */ }
+    }
+    console.log("  FTS5 indexes rebuilt.");
+
     db.close();
     console.log("\n🎉 Database seeded successfully!\n");
     

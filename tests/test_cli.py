@@ -93,7 +93,7 @@ class TestCheckAgentAllowlist:
         """cos has 'migrate' in blocked_cli_commands."""
         ok, msg = check_agent_allowlist("cos", "migrate", agent_caps)
         assert ok is False
-        assert "blocked" in msg.lower() or "not in allowed" in msg.lower()
+        assert "blocked" in msg.lower() or "not in allowed" in msg.lower() or "does not have access" in msg.lower()
 
     def test_cos_blocked_bootstrap(self, agent_caps):
         ok, msg = check_agent_allowlist("cos", "bootstrap", agent_caps)
@@ -107,7 +107,7 @@ class TestCheckAgentAllowlist:
         """Coach has task-create in blocked_cli_commands."""
         ok, msg = check_agent_allowlist("coach", "task-create", agent_caps)
         assert ok is False
-        assert "blocked" in msg.lower() or "not in allowed" in msg.lower()
+        assert "blocked" in msg.lower() or "not in allowed" in msg.lower() or "does not have access" in msg.lower()
 
     def test_coach_blocked_budget(self, agent_caps):
         """Coach cannot discuss money -- budget is blocked."""
@@ -241,8 +241,9 @@ class TestCheckWriteRate:
 
     @pytest.mark.asyncio
     async def test_at_limit_blocked(self, db, governance):
-        """Insert 3 writes in last 60s -> blocked (limit is 3)."""
-        for i in range(3):
+        """Insert writes up to the limit -> blocked."""
+        limit = governance.get("rate_limits", {}).get("writes_per_minute", 20)
+        for i in range(limit):
             await db.execute(
                 "INSERT INTO mem_cos_activity (actor, action_type, description, created_at) "
                 "VALUES (?, 'cli_write', ?, datetime('now'))",

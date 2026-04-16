@@ -59,6 +59,12 @@ action_gates:
   comms_snooze: true           # Snoozing comm items
   # Sensor ingest
   sensor_ingest: true          # Device sensor data — auto-approve
+  # Member settings
+  member_settings_set: confirm # Member setting changes require confirmation
+  # Calendar ingest
+  calendar_ingest: true        # Calendar sync — auto-approve
+  # Chat
+  chat_stream: true            # Chat messages — auto-approve
 
 # Agent-specific overrides (merged on top of defaults above)
 agent_overrides:
@@ -86,8 +92,8 @@ rate_limits:
   sheets: 30                   # Google Sheets webhook
   web_chat: 10                 # Console chat interface
   # Generic write limits
-  writes_per_minute: 3         # Max writes from console per user per minute
-  alert_threshold: 3           # Alert Bossman after this many writes in 60s
+  writes_per_minute: 20        # Max writes from console per user per minute
+  alert_threshold: 10          # Alert Bossman after this many writes in 60s
 
 # ═══════════════════════════════════════════════════════════
 # OUTPUT SANITIZATION

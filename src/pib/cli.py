@@ -50,6 +50,9 @@ WRITE_COMMANDS = {
     "state-update", "capture",
     "run-proactive-checks", "webhook-receive", "sensor-ingest",
     "member-settings-set",
+    # Comms commands (writes)
+    "comms-approve-draft", "comms-respond", "comms-snooze",
+    "calendar-ingest",
     # Channel commands (writes)
     "channel-enable", "channel-disable", "channel-step-done",
     "channel-add", "channel-update",
@@ -61,6 +64,7 @@ READ_COMMANDS = {
     "what-now", "calendar-query", "custody", "budget", "search",
     "morning-digest", "health", "streak", "upcoming", "scoreboard-data",
     "member-settings-get", "bootstrap-verify", "context",
+    "chat-stream",
     # Channel commands (reads)
     "channel-list", "channel-status", "channel-onboarding", "channel-test",
     "channel-send-enum", "channel-member-list",
@@ -83,6 +87,11 @@ COMMAND_TO_GATE = {
     "webhook-receive": "webhook_receive",
     "run-proactive-checks": "run_proactive_checks",
     "member-settings-set": "member_settings_set",
+    # Comms commands
+    "comms-approve-draft": "comms_approve_draft",
+    "comms-respond": "comms_respond",
+    "comms-snooze": "comms_snooze",
+    "calendar-ingest": "calendar_ingest",
     # Channel commands
     "channel-enable": "channel_enable",
     "channel-disable": "channel_disable",
@@ -570,12 +579,14 @@ async def cmd_hold_create(db, args: dict, agent_id: str) -> dict:
         return {"error": "title, date, start_time, and end_time are required"}
 
     hold_id = await next_id(db, "hold")
+    for_member_ids = json.dumps([member_id])
     await db.execute(
         "INSERT INTO cal_classified_events "
-        "(id, title, event_date, start_time, end_time, member_id, "
-        "scheduling_impact, approval_status, created_by) "
-        "VALUES (?, ?, ?, ?, ?, ?, 'SOFT_BLOCK', 'pending', ?)",
-        [hold_id, title, event_date, start_time, end_time, member_id, agent_id],
+        "(id, title, event_date, start_time, end_time, for_member_ids, "
+        "scheduling_impact, needs_human_review, classification_rule) "
+        "VALUES (?, ?, ?, ?, ?, ?, 'SOFT_BLOCK', 1, ?)",
+        [hold_id, title, event_date, start_time, end_time, for_member_ids,
+         f"hold_pending:{agent_id}"],
     )
     await audit_log(db, "cal_classified_events", "INSERT", hold_id, actor=agent_id, source="cli")
     await db.commit()
@@ -591,21 +602,21 @@ async def cmd_hold_confirm(db, args: dict, agent_id: str) -> dict:
         return {"error": "hold_id is required"}
 
     row = await db.execute_fetchone(
-        "SELECT * FROM cal_classified_events WHERE id = ? AND approval_status = 'pending'",
+        "SELECT * FROM cal_classified_events WHERE id = ? AND needs_human_review = 1",
         [hold_id],
     )
     if not row:
         return {"error": f"Hold {hold_id} not found or not pending"}
 
     await db.execute(
-        "UPDATE cal_classified_events SET approval_status = 'confirmed', "
-        "updated_at = datetime('now') WHERE id = ?",
-        [hold_id],
+        "UPDATE cal_classified_events SET needs_human_review = 0, "
+        "classification_rule = ? WHERE id = ?",
+        [f"confirmed:{agent_id}", hold_id],
     )
     await audit_log(
         db, "cal_classified_events", "UPDATE", hold_id, actor=agent_id,
-        old_values='{"approval_status": "pending"}',
-        new_values='{"approval_status": "confirmed"}',
+        old_values='{"needs_human_review": 1}',
+        new_values='{"needs_human_review": 0}',
         source="cli",
     )
     await db.commit()
@@ -1092,7 +1103,7 @@ async def cmd_bootstrap_verify(db, args: dict, agent_id: str) -> dict:
     test_memory_content = "__bootstrap_verify_memory_test_xyz123__"
     try:
         save_result = await save_memory_deduped(
-            db, test_memory_content, "preferences", "test", "m-james", "bootstrap-verify"
+            db, test_memory_content, "preferences", "test", "m-james", "observed"
         )
         await db.commit()
         # Search as m-laura - should NOT find it
@@ -1175,15 +1186,14 @@ async def cmd_sensor_ingest(db, args: dict, agent_id: str) -> dict:
     Receives {source, member_id, timestamp, classification, data}, stores reading,
     auto-classifies m-laura as privileged.
     """
-    from pib.db import next_id
-
     source = args.get("source")
     member_id = args.get("member_id")
-    timestamp = args.get("timestamp")
+    timestamp = args.get("timestamp") or now_et().isoformat()
     data = args.get("data", {})
     classification = args.get("classification", "normal")
-    idempotency_key = args.get("idempotency_key")
-    confidence = args.get("confidence", 1.0)
+    idempotency_key = args.get("idempotency_key") or f"{source}-{member_id}-{int(time.time())}"
+    confidence = args.get("confidence", "high")
+    ttl_minutes = args.get("ttl_minutes", 60)
 
     if not source or not member_id:
         return {"error": "source and member_id are required"}
@@ -1192,33 +1202,59 @@ async def cmd_sensor_ingest(db, args: dict, agent_id: str) -> dict:
     if member_id == "m-laura":
         classification = "privileged"
 
-    # Check for duplicate via idempotency key
-    if idempotency_key:
-        existing = await db.execute_fetchone(
-            "SELECT id FROM pib_sensor_readings WHERE idempotency_key = ?",
-            [idempotency_key],
-        )
-        if existing:
-            return {"status": "duplicate", "existing_id": existing["id"]}
+    # Normalize confidence to schema enum
+    if isinstance(confidence, (int, float)):
+        if confidence >= 0.8:
+            confidence = "high"
+        elif confidence >= 0.5:
+            confidence = "medium"
+        else:
+            confidence = "low"
 
-    # Generate sensor reading ID
-    reading_id = await next_id(db, "sns")
+    # Check for duplicate via idempotency key
+    existing = await db.execute_fetchone(
+        "SELECT id FROM pib_sensor_readings WHERE idempotency_key = ?",
+        [idempotency_key],
+    )
+    if existing:
+        return {"status": "duplicate", "existing_id": existing["id"]}
 
     # Extract reading_type from source or data
     reading_type = data.get("type") or source
 
-    # Store the reading
+    # Auto-register sensor if not in pib_sensor_config (avoids FK failure)
+    existing_sensor = await db.execute_fetchone(
+        "SELECT sensor_id FROM pib_sensor_config WHERE sensor_id = ?", [source]
+    )
+    if not existing_sensor:
+        await db.execute(
+            "INSERT OR IGNORE INTO pib_sensor_config "
+            "(sensor_id, name, category, enabled, poll_interval_minutes) "
+            "VALUES (?, ?, 'auto_registered', 1, 60)",
+            [source, source],
+        )
+
+    # Store the reading (id is AUTOINCREMENT — let SQLite assign it)
     await db.execute(
         """INSERT INTO pib_sensor_readings
-           (id, sensor_id, reading_type, member_id, timestamp, value, classification, confidence, idempotency_key)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           (sensor_id, reading_type, member_id, timestamp, value,
+            classification, confidence, ttl_minutes, expires_at, idempotency_key)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?,
+                   strftime('%Y-%m-%dT%H:%M:%SZ', ?, '+' || ? || ' minutes'), ?)""",
         [
-            reading_id, source, reading_type, member_id,
-            timestamp or now_et().isoformat(),
-            json.dumps(data), classification, confidence, idempotency_key,
+            source, reading_type, member_id, timestamp,
+            json.dumps(data), classification, confidence,
+            ttl_minutes, timestamp, str(ttl_minutes), idempotency_key,
         ],
     )
     await db.commit()
+
+    # Retrieve the auto-generated id
+    row = await db.execute_fetchone(
+        "SELECT id FROM pib_sensor_readings WHERE idempotency_key = ?",
+        [idempotency_key],
+    )
+    reading_id = row["id"] if row else None
 
     return {
         "status": "stored",
@@ -1227,6 +1263,91 @@ async def cmd_sensor_ingest(db, args: dict, agent_id: str) -> dict:
         "classification": classification,
         "source": source,
     }
+
+
+async def cmd_comms_approve_draft(db, args: dict, agent_id: str) -> dict:
+    """Approve a comms draft for sending."""
+    from pib.comms import approve_draft
+
+    comm_id = args.get("comm_id")
+    if not comm_id:
+        return {"error": "comm_id is required"}
+
+    edited_body = args.get("edited_body")
+    result = await approve_draft(db, comm_id, edited_body)
+    if not result:
+        return {"error": f"Draft {comm_id} not found or not pending"}
+    await db.commit()
+    return {"comm_id": comm_id, "status": "approved", "draft": result}
+
+
+async def cmd_comms_respond(db, args: dict, agent_id: str) -> dict:
+    """Mark a comms item as responded."""
+    from pib.comms import mark_responded
+
+    comm_id = args.get("comm_id")
+    if not comm_id:
+        return {"error": "comm_id is required"}
+
+    outcome = args.get("outcome", "responded")
+    success = await mark_responded(db, comm_id, outcome)
+    await db.commit()
+    return {"comm_id": comm_id, "status": "responded" if success else "not_found"}
+
+
+async def cmd_comms_snooze(db, args: dict, agent_id: str) -> dict:
+    """Snooze a comms item until a given time."""
+    from pib.comms import snooze_comm
+
+    comm_id = args.get("comm_id")
+    until = args.get("until")
+    if not comm_id or not until:
+        return {"error": "comm_id and until are required"}
+
+    success = await snooze_comm(db, comm_id, until)
+    await db.commit()
+    return {"comm_id": comm_id, "status": "snoozed", "until": until}
+
+
+async def cmd_chat_stream(db, args: dict, agent_id: str) -> dict:
+    """Stub for chat-stream — actual streaming handled by LLM layer."""
+    return {
+        "error": "chat-stream requires LLM integration (not available in CLI mode)",
+        "hint": "Use the console /api/chat/stream endpoint with SSE",
+    }
+
+
+async def cmd_calendar_ingest(db, args: dict, agent_id: str) -> dict:
+    """Ingest calendar events from Google Calendar sync."""
+    events = args.get("events", [])
+    if not events:
+        return {"error": "events array is required"}
+
+    from pib.db import next_id, audit_log
+    ingested = 0
+    for event in events:
+        event_id = await next_id(db, "cal")
+        event_date = event.get("date") or event.get("start", "")[:10]
+        await db.execute(
+            "INSERT OR REPLACE INTO cal_classified_events "
+            "(id, event_date, start_time, end_time, title, title_redacted, "
+            "event_type, category, for_member_ids, scheduling_impact, privacy) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                event_id, event_date,
+                event.get("start_time") or event.get("start"),
+                event.get("end_time") or event.get("end"),
+                event.get("title", ""), event.get("title_redacted", event.get("title", "")),
+                event.get("event_type", "calendar"), event.get("category", "general"),
+                json.dumps(event.get("for_member_ids", [])),
+                event.get("scheduling_impact", "FYI"),
+                event.get("privacy", "full"),
+            ],
+        )
+        ingested += 1
+
+    await db.commit()
+    return {"status": "ok", "ingested": ingested}
 
 
 # ═══════════════════════════════════════════════════════════
@@ -1269,6 +1390,11 @@ COMMAND_REGISTRY: dict[str, tuple[Any, str]] = {
     "bootstrap-verify":     (cmd_bootstrap_verify,      "read"),
     "sensor-ingest":        (cmd_sensor_ingest,         "write"),
     "context":              (cmd_context,               "read"),
+    "comms-approve-draft":  (cmd_comms_approve_draft,   "write"),
+    "comms-respond":        (cmd_comms_respond,         "write"),
+    "comms-snooze":         (cmd_comms_snooze,          "write"),
+    "chat-stream":          (cmd_chat_stream,           "read"),
+    "calendar-ingest":      (cmd_calendar_ingest,       "write"),
 }
 
 # Merge channel commands into registry

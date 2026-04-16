@@ -111,7 +111,8 @@ try {
   // Step 2: Ingest into PIB database
   let ingestRaw;
   try {
-    ingestRaw = run("python", ["-m", "pib.cli", "calendar-ingest", DB_PATH, "--json", eventsRaw]);
+    const PYTHON_CMD = process.env.PIB_PYTHON || "python3";
+    ingestRaw = run(PYTHON_CMD, ["-m", "pib.cli", "calendar-ingest", DB_PATH, "--json", eventsRaw]);
   } catch (e) {
     throw new Error(`calendar-ingest failed: ${e.message}`);
   }

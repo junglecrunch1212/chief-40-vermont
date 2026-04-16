@@ -158,7 +158,7 @@ async def test_bluebubbles_send():
         mock_response.json.return_value = {"status": "ok", "data": {"guid": "msg-123"}}
         sender._client.post = AsyncMock(return_value=mock_response)
 
-        msg = OutboundMessage(channel="imessage", to="+14045551234", content="Hello!")
+        msg = OutboundMessage(channel="imessage", to="+14045551234", content="Hello!", member_id="m-james")
         result = await sender.send(msg)
 
     assert result["ok"] is True

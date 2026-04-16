@@ -129,14 +129,28 @@ class ChannelRegistry:
             
             # Extract capabilities from config
             caps_data = config.get("capabilities", {})
-            capabilities = ChannelCapabilities(
-                can_inbound=caps_data.get("can_inbound", True),
-                can_outbound=caps_data.get("can_outbound", True),
-                can_draft=caps_data.get("can_draft", True),
-                can_extract=caps_data.get("can_extract", True),
-                can_voice_corpus=caps_data.get("can_voice_corpus", False),
-                can_auto_handle=caps_data.get("can_auto_handle", False),
-            )
+            # Handle both array format (["in","out"]) and dict format ({"can_inbound": true})
+            if isinstance(caps_data, list):
+                cap_set = set(caps_data)
+                capabilities = ChannelCapabilities(
+                    can_inbound="in" in cap_set,
+                    can_outbound="out" in cap_set,
+                    can_draft="draft" in cap_set,
+                    can_extract="extract" in cap_set,
+                    can_voice_corpus="voice" in cap_set,
+                    can_auto_handle="auto_handle" in cap_set,
+                )
+            elif isinstance(caps_data, dict):
+                capabilities = ChannelCapabilities(
+                    can_inbound=caps_data.get("can_inbound", True),
+                    can_outbound=caps_data.get("can_outbound", True),
+                    can_draft=caps_data.get("can_draft", True),
+                    can_extract=caps_data.get("can_extract", True),
+                    can_voice_corpus=caps_data.get("can_voice_corpus", False),
+                    can_auto_handle=caps_data.get("can_auto_handle", False),
+                )
+            else:
+                capabilities = ChannelCapabilities()
             
             # Extract behavior from config
             behavior_data = config.get("behavior", {})

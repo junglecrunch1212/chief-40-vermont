@@ -53,18 +53,20 @@ WRITE_COMMANDS = {
     # Comms commands (writes)
     "comms-approve-draft", "comms-respond", "comms-snooze",
     "calendar-ingest",
+    # Cron commands (writes)
+    "recurring-spawn", "compute-daily-states", "promote-facts",
     # Channel commands (writes)
     "channel-enable", "channel-disable", "channel-step-done",
     "channel-add", "channel-update",
     "channel-grant-access", "channel-revoke-access", "channel-setup-member",
     "device-status",
 }
-ADMIN_COMMANDS = {"bootstrap", "backup", "migrate"}
+ADMIN_COMMANDS = {"bootstrap", "backup", "migrate", "cleanup", "fts5-rebuild"}
 READ_COMMANDS = {
     "what-now", "calendar-query", "custody", "budget", "search",
     "morning-digest", "health", "streak", "upcoming", "scoreboard-data",
     "member-settings-get", "bootstrap-verify", "context",
-    "chat-stream",
+    "chat-stream", "escalation-check", "channel-health-check",
     # Channel commands (reads)
     "channel-list", "channel-status", "channel-onboarding", "channel-test",
     "channel-send-enum", "channel-member-list",
@@ -1310,16 +1312,66 @@ async def cmd_comms_snooze(db, args: dict, agent_id: str) -> dict:
 
 
 async def cmd_chat_stream(db, args: dict, agent_id: str) -> dict:
-    """Stub for chat-stream — actual streaming handled by LLM layer."""
-    return {
-        "error": "chat-stream requires LLM integration (not available in CLI mode)",
-        "hint": "Use the console /api/chat/stream endpoint with SSE",
-    }
+    """Streaming chat — writes SSE events to stdout, returns empty dict.
+
+    This command is special: it bypasses normal JSON output and writes
+    SSE-formatted data directly to stdout for the Express server to pipe.
+    When called normally (not via spawn), returns the last message as JSON.
+    """
+    from pib.llm import stream_chat
+
+    member_id = args.get("member_id", "m-james")
+    session_id = args.get("session_id")
+    message = args.get("message", "")
+
+    # If no message, load the last user message from the session
+    if not message and session_id:
+        row = await db.execute_fetchone(
+            "SELECT content FROM mem_messages WHERE session_id = ? AND role = 'user' "
+            "ORDER BY created_at DESC LIMIT 1",
+            [session_id],
+        )
+        if row:
+            message = row["content"]
+
+    if not message:
+        sys.stdout.write(f"data: {json.dumps({'type': 'error', 'content': 'No message provided'})}\n\n")
+        sys.stdout.write(f"data: {json.dumps({'type': 'done'})}\n\n")
+        sys.stdout.flush()
+        return {"_streamed": True}
+
+    full_response = ""
+    try:
+        async for chunk in stream_chat(db, message, member_id, channel="web",
+                                       session_id=session_id, agent_id=agent_id):
+            sys.stdout.write(chunk)
+            sys.stdout.flush()
+            if '"type": "text"' in chunk or '"type":"text"' in chunk:
+                try:
+                    data_line = chunk.strip().replace("data: ", "", 1).strip()
+                    parsed = json.loads(data_line)
+                    full_response += parsed.get("content", "")
+                except (json.JSONDecodeError, ValueError):
+                    pass
+    except Exception as e:
+        err_event = json.dumps({"type": "error", "content": str(e)})
+        sys.stdout.write(f"data: {err_event}\n\n")
+        sys.stdout.flush()
+
+    # Signal we already wrote output so run() doesn't double-print
+    return {"_streamed": True}
 
 
 async def cmd_calendar_ingest(db, args: dict, agent_id: str) -> dict:
-    """Ingest calendar events from Google Calendar sync."""
-    events = args.get("events", [])
+    """Ingest calendar events from Google Calendar sync.
+
+    Accepts either {"events": [...]} or a bare [...] array (from calendar_sync.mjs).
+    """
+    # Handle both dict-wrapped and bare-array formats
+    if isinstance(args, list):
+        events = args
+    else:
+        events = args.get("events", [])
     if not events:
         return {"error": "events array is required"}
 
@@ -1348,6 +1400,218 @@ async def cmd_calendar_ingest(db, args: dict, agent_id: str) -> dict:
 
     await db.commit()
     return {"status": "ok", "ingested": ingested}
+
+
+# ═══════════════════════════════════════════════════════════
+# CRON COMMANDS (pib-proactive agent)
+# ═══════════════════════════════════════════════════════════
+
+async def cmd_recurring_spawn(db, args: dict, agent_id: str) -> dict:
+    """Spawn tasks from ops_recurring where next_due <= today."""
+    from pib.db import next_id, audit_log
+
+    today = date.today().isoformat()
+    rows = await db.execute_fetchall(
+        "SELECT * FROM ops_recurring WHERE active = 1 AND next_due <= ?",
+        [today],
+    )
+    if not rows:
+        return {"spawned": 0, "tasks": []}
+
+    spawned = []
+    for r in rows:
+        rec = dict(r)
+        task_id = await next_id(db, "tsk")
+        await db.execute(
+            "INSERT INTO ops_tasks "
+            "(id, title, assignee, domain, effort, energy, micro_script, "
+            "item_type, recurring_ref, points, created_by, source_system) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 'task', ?, ?, 'system', 'recurring_spawn')",
+            [
+                task_id, rec["title"], rec["assignee"], rec["domain"],
+                rec.get("effort", "small"), rec.get("energy", "low"),
+                rec.get("micro_script_template", ""),
+                rec["id"], rec.get("points", 1),
+            ],
+        )
+        # Advance next_due
+        await db.execute(
+            "UPDATE ops_recurring SET last_spawned = datetime('now'), "
+            "next_due = date(next_due, '+' || CASE lower(frequency) "
+            "    WHEN 'daily' THEN '1' WHEN 'weekdays' THEN '1' "
+            "    WHEN 'weekly' THEN '7' WHEN 'biweekly' THEN '14' "
+            "    WHEN 'monthly' THEN '30' WHEN 'quarterly' THEN '90' "
+            "    WHEN 'yearly' THEN '365' ELSE '7' END || ' days') "
+            "WHERE id = ?",
+            [rec["id"]],
+        )
+        await audit_log(db, "ops_tasks", "INSERT", task_id, actor="recurring_spawn", source="cron")
+        spawned.append({"task_id": task_id, "title": rec["title"], "from": rec["id"]})
+
+    await db.commit()
+    return {"spawned": len(spawned), "tasks": spawned}
+
+
+async def cmd_compute_daily_states(db, args: dict, agent_id: str) -> dict:
+    """Compute cal_daily_states for today."""
+    from pib.engine import compute_complexity_score
+    from pib.custody import who_has_child
+
+    today = date.today().isoformat()
+
+    events = await db.execute_fetchall(
+        "SELECT * FROM cal_classified_events WHERE event_date = ?", [today]
+    )
+    event_list = [dict(e) for e in events] if events else []
+
+    overdue = await db.execute_fetchone(
+        "SELECT COUNT(*) as c FROM ops_tasks "
+        "WHERE due_date < ? AND status NOT IN ('done','dismissed')", [today]
+    )
+    overdue_count = overdue["c"] if overdue else 0
+
+    custody_row = await db.execute_fetchone(
+        "SELECT * FROM common_custody_configs WHERE active = 1 LIMIT 1"
+    )
+    custody_states = {}
+    if custody_row:
+        parent = who_has_child(date.today(), dict(custody_row))
+        custody_states = {"parent": parent, "transition_today": False}
+
+    state = {
+        "events": event_list,
+        "overdue_tasks": overdue_count,
+        "custody_states": custody_states,
+    }
+    score = compute_complexity_score(state)
+
+    member_rows = await db.execute_fetchall("SELECT * FROM common_members WHERE active = 1 AND role = 'parent'")
+    member_states = {}
+    for m in (member_rows or []):
+        energy = await db.execute_fetchone(
+            "SELECT * FROM pib_energy_states WHERE member_id = ? AND state_date = ?",
+            [m["id"], today],
+        )
+        member_states[m["id"]] = {
+            "energy_level": energy["energy_level"] if energy else "medium",
+            "completions": energy["completions_today"] if energy else 0,
+        }
+
+    await db.execute(
+        "INSERT INTO cal_daily_states "
+        "(state_date, custody_states, member_states, complexity_score, task_load) "
+        "VALUES (?, ?, ?, ?, ?)",
+        [
+            today, json.dumps(custody_states), json.dumps(member_states),
+            score, json.dumps({"overdue": overdue_count, "events": len(event_list)}),
+        ],
+    )
+    await db.commit()
+    return {"date": today, "complexity_score": score, "events": len(event_list), "overdue": overdue_count}
+
+
+async def cmd_escalation_check(db, args: dict, agent_id: str) -> dict:
+    """Check for overdue tasks and flag escalations."""
+    today = date.today().isoformat()
+    rows = await db.execute_fetchall(
+        "SELECT * FROM ops_tasks WHERE due_date < ? AND status NOT IN ('done','dismissed','deferred') "
+        "ORDER BY due_date", [today]
+    )
+    overdue = [dict(r) for r in rows] if rows else []
+    escalations = []
+    for t in overdue:
+        days_overdue = (date.today() - date.fromisoformat(t["due_date"])).days
+        if days_overdue >= 3:
+            escalations.append({"task_id": t["id"], "title": t["title"],
+                                "days_overdue": days_overdue, "assignee": t["assignee"]})
+    return {"overdue_count": len(overdue), "escalations": escalations}
+
+
+async def cmd_promote_facts(db, args: dict, agent_id: str) -> dict:
+    """Promote session facts nearing expiry to long-term memory."""
+    from pib.memory import save_memory_deduped
+
+    rows = await db.execute_fetchall(
+        "SELECT * FROM mem_session_facts "
+        "WHERE auto_promoted = 0 AND expires_at <= datetime('now', '+24 hours') "
+        "ORDER BY created_at LIMIT 50"
+    )
+    if not rows:
+        return {"promoted": 0}
+
+    promoted = 0
+    for fact in rows:
+        f = dict(fact)
+        try:
+            await save_memory_deduped(
+                db, f["content"], f.get("fact_type", "observation"),
+                f.get("domain", "general"), f.get("member_id"),
+                "auto_promoted",
+            )
+            await db.execute(
+                "UPDATE mem_session_facts SET auto_promoted = 1 WHERE id = ?", [f["id"]]
+            )
+            promoted += 1
+        except Exception as e:
+            log.warning(f"Failed to promote fact {f['id']}: {e}")
+
+    await db.commit()
+    return {"promoted": promoted}
+
+
+async def cmd_cleanup(db, args: dict, agent_id: str) -> dict:
+    """Clean expired data: undo log, session facts, sensor readings, dead letters."""
+    deleted = {}
+
+    # Expired undo log entries (>24h)
+    cursor = await db.execute("DELETE FROM common_undo_log WHERE expires_at < datetime('now') AND undone = 0")
+    deleted["undo_log"] = cursor.rowcount if hasattr(cursor, 'rowcount') else 0
+
+    # Expired session facts
+    cursor = await db.execute("DELETE FROM mem_session_facts WHERE expires_at < datetime('now') AND auto_promoted = 1")
+    deleted["session_facts"] = cursor.rowcount if hasattr(cursor, 'rowcount') else 0
+
+    # Expired sensor readings
+    cursor = await db.execute("DELETE FROM pib_sensor_readings WHERE expires_at < datetime('now')")
+    deleted["sensor_readings"] = cursor.rowcount if hasattr(cursor, 'rowcount') else 0
+
+    # Resolved dead letters older than 7 days
+    cursor = await db.execute(
+        "DELETE FROM common_dead_letter WHERE resolved = 1 AND resolved_at < datetime('now', '-7 days')"
+    )
+    deleted["dead_letters"] = cursor.rowcount if hasattr(cursor, 'rowcount') else 0
+
+    await db.commit()
+    return {"deleted": deleted}
+
+
+async def cmd_fts5_rebuild(db, args: dict, agent_id: str) -> dict:
+    """Rebuild all FTS5 indexes."""
+    fts_tables = [
+        "ops_tasks_fts", "ops_items_fts", "mem_long_term_fts",
+        "cap_captures_fts", "comms_fts", "proj_research_fts",
+    ]
+    rebuilt = []
+    for table in fts_tables:
+        try:
+            await db.execute(f"INSERT INTO {table}({table}) VALUES('rebuild')")
+            rebuilt.append(table)
+        except Exception as e:
+            log.warning(f"FTS5 rebuild skipped for {table}: {e}")
+
+    await db.commit()
+    return {"rebuilt": rebuilt, "count": len(rebuilt)}
+
+
+async def cmd_channel_health_check(db, args: dict, agent_id: str) -> dict:
+    """Check health of all enabled channels and update comms_channel_health."""
+    rows = await db.execute_fetchall(
+        "SELECT c.id, c.display_name, h.status, h.consecutive_failures "
+        "FROM comms_channels c LEFT JOIN comms_channel_health h ON c.id = h.channel_id "
+        "WHERE c.enabled = 1"
+    )
+    channels = [dict(r) for r in rows] if rows else []
+    return {"channels_checked": len(channels), "channels": channels}
 
 
 # ═══════════════════════════════════════════════════════════
@@ -1395,6 +1659,14 @@ COMMAND_REGISTRY: dict[str, tuple[Any, str]] = {
     "comms-snooze":         (cmd_comms_snooze,          "write"),
     "chat-stream":          (cmd_chat_stream,           "read"),
     "calendar-ingest":      (cmd_calendar_ingest,       "write"),
+    # Cron commands
+    "recurring-spawn":      (cmd_recurring_spawn,       "write"),
+    "compute-daily-states": (cmd_compute_daily_states,  "write"),
+    "escalation-check":     (cmd_escalation_check,      "read"),
+    "promote-facts":        (cmd_promote_facts,         "write"),
+    "cleanup":              (cmd_cleanup,               "admin"),
+    "fts5-rebuild":         (cmd_fts5_rebuild,          "admin"),
+    "channel-health-check": (cmd_channel_health_check,  "read"),
 }
 
 # Merge channel commands into registry
@@ -1448,19 +1720,27 @@ def _parse_args(argv: list[str]) -> tuple[str, str, dict, str]:
     while i < len(argv):
         if argv[i] == "--json" and i + 1 < len(argv):
             try:
-                args_dict = json.loads(argv[i + 1])
+                parsed = json.loads(argv[i + 1])
+                # If JSON is an array, wrap it for commands that expect it (e.g. calendar-ingest)
+                if isinstance(parsed, list):
+                    args_dict = parsed  # type: ignore[assignment]
+                else:
+                    args_dict = parsed
             except json.JSONDecodeError as e:
                 _die(f"Invalid --json argument: {e}")
             i += 2
         elif argv[i] == "--member" and i + 1 < len(argv):
             member_id = argv[i + 1]
             i += 2
+        elif argv[i] == "--session-id" and i + 1 < len(argv):
+            args_dict["session_id"] = argv[i + 1]
+            i += 2
         else:
             _err(f"Unknown argument: {argv[i]}")
             i += 1
 
-    # Inject member_id into args if provided
-    if member_id:
+    # Inject member_id into args if provided (only for dict args, not list)
+    if member_id and isinstance(args_dict, dict):
         args_dict["member_id"] = member_id
 
     return command, db_path, args_dict, member_id
@@ -1532,6 +1812,11 @@ async def run(argv: list[str]) -> None:
                 db, agent_id, command, args_dict, f"ERROR: {e}", False
             )
             _out({"error": "command_failed", "command": command, "detail": str(e)})
+            return
+
+        # ── Skip output for streaming commands (they write directly to stdout) ──
+        if isinstance(result, dict) and result.get("_streamed"):
+            await audit_invocation(db, agent_id, command, args_dict, "ok: streamed", True)
             return
 
         # ── Layer 5: Sanitize output ──

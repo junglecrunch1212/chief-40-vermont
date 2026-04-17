@@ -632,7 +632,7 @@ async def cmd_hold_reject(db, args: dict, agent_id: str) -> dict:
         return {"error": "hold_id is required"}
 
     row = await db.execute_fetchone(
-        "SELECT * FROM cal_classified_events WHERE id = ? AND approval_status = 'pending'",
+        "SELECT * FROM cal_classified_events WHERE id = ? AND needs_human_review = 1",
         [hold_id],
     )
     if not row:
@@ -640,14 +640,14 @@ async def cmd_hold_reject(db, args: dict, agent_id: str) -> dict:
 
     reason = args.get("reason", "")
     await db.execute(
-        "UPDATE cal_classified_events SET approval_status = 'rejected', "
-        "updated_at = datetime('now') WHERE id = ?",
-        [hold_id],
+        "UPDATE cal_classified_events SET needs_human_review = 0, "
+        "classification_rule = ? WHERE id = ?",
+        [f"rejected:{agent_id}:{reason}", hold_id],
     )
     await audit_log(
         db, "cal_classified_events", "UPDATE", hold_id, actor=agent_id,
-        old_values='{"approval_status": "pending"}',
-        new_values=json.dumps({"approval_status": "rejected", "reason": reason}),
+        old_values='{"needs_human_review": 1}',
+        new_values=json.dumps({"needs_human_review": 0, "classification_rule": f"rejected:{reason}"}),
         source="cli",
     )
     await db.commit()

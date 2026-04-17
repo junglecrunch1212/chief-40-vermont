@@ -1651,20 +1651,20 @@ app.get("/api/comms/inbox", requireMember, (req, res) => {
 
 // --- Approve draft ---
 app.post("/api/comms/:id/approve-draft", requireMember, (req, res) => {
-  const result = runCLI("comms-approve-draft", { comms_id: req.params.id }, req.memberId);
+  const result = runCLI("comms-approve-draft", { comm_id: req.params.id }, req.memberId);
   res.json(result);
 });
 
 // --- Mark as responded ---
 app.post("/api/comms/:id/respond", requireMember, (req, res) => {
-  const result = runCLI("comms-respond", { comms_id: req.params.id }, req.memberId);
+  const result = runCLI("comms-respond", { comm_id: req.params.id }, req.memberId);
   res.json(result);
 });
 
 // --- Snooze ---
 app.post("/api/comms/:id/snooze", requireMember, (req, res) => {
   const until = req.query.until || req.body.until;
-  const result = runCLI("comms-snooze", { comms_id: req.params.id, until }, req.memberId);
+  const result = runCLI("comms-snooze", { comm_id: req.params.id, until }, req.memberId);
   res.json(result);
 });
 
